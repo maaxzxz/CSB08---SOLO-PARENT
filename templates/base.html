@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Solo Parent Decision Support System{% endblock %}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark">
+        <div class="container">
+            <a class="navbar-brand" href="/">
+                <i class="fas fa-shield-alt"></i> Solo Parent Decision Support System
+                <br><small>Compliance with RA 11861</small>
+            </a>
+        </div>
+    </nav>
+
+    <main>
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer class="py-4">
+        <div class="container">
+            <div class="row">
+                <div class="col-md-4 mb-3">
+                    <h6 class="mb-3">About This System</h6>
+                    <p class="small mb-0">An AI-powered assessment tool designed to streamline access to Solo Parent benefits under RA 11861.</p>
+                </div>
+                <div class="col-md-4 mb-3">
+                    <h6 class="mb-3">Privacy & Security</h6>
+                    <ul class="list-unstyled small mb-0">
+                        <li><a href="#" class="text-white">Anonymous processing</a></li>
+                        <li><a href="#" class="text-white">Data encryption</a></li>
+                        <li><a href="#" class="text-white">No data storage</a></li>
+                    </ul>
+                </div>
+                <div class="col-md-4 mb-3">
+                    <h6 class="mb-3">Legal Compliance</h6>
+                    <ul class="list-unstyled small mb-0">
+                        <li><a href="#" class="text-white">RA 11861 compliant</a></li>
+                        <li><a href="#" class="text-white">Privacy policy</a></li>
+                        <li><a href="#" class="text-white">Report inquiry</a></li>
+                    </ul>
+                </div>
+            </div>
+            <hr style="border-color: rgba(255,255,255,0.2);">
+            <p class="small text-center mb-0">&copy; 2025 Solo Parent Decision Support System • Republic of the Philippines • For demonstration purposes only</p>
+        </div>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
+

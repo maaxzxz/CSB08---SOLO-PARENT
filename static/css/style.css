@@ -1,0 +1,447 @@
+:root {
+    --primary-color: #002d5f;
+    --primary-dark: #001a36;
+    --danger-color: #8b0000;
+    --danger-hover: #660000;
+    --text-color: #333;
+    --light-bg: #f8f9fa;
+    --border-color: #e0e0e0;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+html, body {
+    height: 100%;
+}
+
+body {
+    display: flex;
+    flex-direction: column;
+    background-color: #f5f5f5;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    color: var(--text-color);
+    line-height: 1.6;
+}
+
+main {
+    flex: 1;
+}
+
+/* ============ Navigation Bar ============ */
+.navbar {
+    background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-dark) 100%);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    padding: 1rem 0;
+}
+
+.navbar-brand {
+    font-weight: 700;
+    font-size: 1.3rem;
+    color: white !important;
+    letter-spacing: 0.5px;
+}
+
+.navbar-brand small {
+    display: block;
+    font-size: 0.7rem;
+    font-weight: 500;
+    opacity: 0.9;
+}
+
+/* ============ Hero Section ============ */
+.hero-section {
+    background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-dark) 100%);
+    color: white;
+    padding: 5rem 0 !important;
+}
+
+.hero-section h1 {
+    font-size: 2.8rem;
+    font-weight: 700;
+    margin-bottom: 1rem;
+    color: white;
+}
+
+.hero-section .lead {
+    font-size: 1.1rem;
+    margin-bottom: 2rem;
+    opacity: 0.95;
+}
+
+.btn-danger {
+    background-color: var(--danger-color);
+    border-color: var(--danger-color);
+    font-weight: 600;
+    padding: 0.65rem 2rem;
+    transition: all 0.3s ease;
+}
+
+.btn-danger:hover {
+    background-color: var(--danger-hover);
+    border-color: var(--danger-hover);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(139, 0, 0, 0.3);
+}
+
+/* ============ Benefits Section ============ */
+.benefits-section {
+    background-color: var(--danger-color);
+    color: white;
+    padding: 3rem 0 !important;
+}
+
+.benefits-section h3 {
+    color: white;
+    font-weight: 700;
+    margin-bottom: 1.5rem;
+    font-size: 1.5rem;
+}
+
+.benefits-section i {
+    margin-right: 0.5rem;
+    font-size: 1.3rem;
+}
+
+.benefits-list {
+    list-style: none;
+    padding: 0;
+}
+
+.benefits-list li {
+    padding: 0.8rem 0;
+    padding-left: 2rem;
+    position: relative;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.benefits-list li:last-child {
+    border-bottom: none;
+}
+
+.benefits-list li:before {
+    content: "✓";
+    position: absolute;
+    left: 0;
+    font-weight: bold;
+    font-size: 1.2rem;
+}
+
+.process-steps {
+    display: flex;
+    flex-direction: column;
+    gap: 2rem;
+}
+
+.step {
+    display: flex;
+    align-items: flex-start;
+    gap: 1rem;
+}
+
+.step-number {
+    flex-shrink: 0;
+    width: 50px;
+    height: 50px;
+    background-color: rgba(255, 255, 255, 0.2);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 1.5rem;
+    border: 2px solid rgba(255, 255, 255, 0.4);
+}
+
+.step h5 {
+    color: white;
+    font-weight: 700;
+    margin-bottom: 0.3rem;
+}
+
+.step p {
+    margin: 0;
+    font-size: 0.95rem;
+    opacity: 0.9;
+}
+
+/* ============ Why Section ============ */
+.why-section {
+    padding: 4rem 0 !important;
+}
+
+.why-section h2 {
+    color: var(--primary-color);
+    font-weight: 700;
+    font-size: 2.2rem;
+    margin-bottom: 1rem;
+}
+
+.feature-icon {
+    font-size: 3rem;
+    color: var(--danger-color);
+    margin-bottom: 1rem;
+}
+
+.why-section h5 {
+    color: var(--primary-color);
+    font-weight: 700;
+    margin-bottom: 1rem;
+    font-size: 1.3rem;
+}
+
+/* ============ Cards & Forms ============ */
+.card {
+    border: none;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+    border-radius: 8px;
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+}
+
+.card-header {
+    background-color: var(--primary-color) !important;
+    color: white !important;
+    border-bottom: none;
+    border-radius: 8px 8px 0 0;
+    padding: 1.25rem;
+}
+
+.card-header h5 {
+    color: white;
+    font-weight: 700;
+    margin: 0;
+}
+
+.card-body {
+    padding: 2rem;
+}
+
+.form-label {
+    font-weight: 600;
+    color: var(--text-color);
+    margin-bottom: 0.5rem;
+    font-size: 0.95rem;
+}
+
+.form-control, .form-select {
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 0.6rem 0.85rem;
+    font-size: 0.95rem;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.form-control:focus, .form-select:focus {
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 3px rgba(0, 61, 130, 0.1);
+    outline: none;
+}
+
+/* ============ Benefit Card ============ */
+.benefit-card {
+    background: white;
+    border: 2px solid var(--light-bg);
+    border-radius: 8px;
+    padding: 1.5rem;
+    text-align: left;
+    transition: all 0.2s;
+    height: 100%;
+}
+
+.benefit-card:hover {
+    border-color: var(--danger-color);
+    box-shadow: 0 4px 12px rgba(139, 0, 0, 0.1);
+}
+
+.benefit-title {
+    font-weight: 700;
+    color: var(--primary-color);
+    margin-bottom: 0.5rem;
+    font-size: 1rem;
+}
+
+.benefit-desc {
+    font-size: 0.9rem;
+    color: #666;
+    line-height: 1.5;
+}
+
+/* ============ Result Icons ============ */
+.result-icon {
+    font-size: 4rem;
+}
+
+.result-icon .fa-check-circle {
+    color: #28a745;
+}
+
+.result-icon .fa-exclamation-circle {
+    color: #ffc107;
+}
+
+.result-icon .fa-times-circle {
+    color: #dc3545;
+}
+
+/* ============ Alerts ============ */
+.alert {
+    border: none;
+    border-radius: 6px;
+    padding: 1.25rem;
+}
+
+.alert-info {
+    background-color: #e3f2fd;
+    color: #0d47a1;
+}
+
+.alert-warning {
+    background-color: #fff3cd;
+    color: #856404;
+}
+
+/* ============ Links ============ */
+.link-secondary {
+    text-decoration: none;
+    color: var(--primary-color);
+    font-weight: 500;
+    transition: color 0.2s;
+}
+
+.link-secondary:hover {
+    color: var(--danger-color);
+}
+
+.link-secondary i {
+    margin-right: 0.3rem;
+}
+
+/* ============ Buttons ============ */
+.btn {
+    font-weight: 600;
+    border-radius: 4px;
+    transition: all 0.2s;
+    padding: 0.6rem 1.5rem;
+}
+
+.btn-secondary {
+    background-color: #6c757d;
+    border-color: #6c757d;
+}
+
+.btn-secondary:hover {
+    background-color: #5a6268;
+    border-color: #5a6268;
+}
+
+.btn-outline-secondary {
+    color: #6c757d;
+    border-color: #6c757d;
+}
+
+.btn-outline-secondary:hover {
+    background-color: #6c757d;
+    border-color: #6c757d;
+}
+
+.btn-lg {
+    padding: 0.75rem 2rem;
+    font-size: 1rem;
+}
+
+/* ============ Footer ============ */
+footer {
+    background: var(--primary-color);
+    color: white;
+    border-top: 1px solid #e0e0e0;
+    margin-top: auto;
+}
+
+footer p {
+    margin: 0;
+    opacity: 0.9;
+}
+
+/* ============ Typography ============ */
+h1, h2, h3, h4, h5, h6 {
+    font-weight: 700;
+    color: var(--primary-color);
+}
+
+.text-danger {
+    color: var(--danger-color) !important;
+}
+
+.text-muted {
+    color: #999 !important;
+}
+
+.text-center {
+    text-align: center;
+}
+
+.text-start {
+    text-align: left;
+}
+
+/* ============ Responsive ============ */
+@media (max-width: 768px) {
+    .hero-section h1 {
+        font-size: 2rem;
+    }
+
+    .hero-section .lead {
+        font-size: 1rem;
+    }
+
+    .hero-section {
+        padding: 3rem 0 !important;
+    }
+
+    .benefits-section {
+        padding: 2rem 0 !important;
+    }
+
+    .process-steps {
+        gap: 1.5rem;
+    }
+
+    .card-body {
+        padding: 1.5rem;
+    }
+
+    .btn-danger {
+        width: 100%;
+    }
+
+    .container {
+        padding: 0 1rem;
+    }
+
+    .result-icon {
+        font-size: 3rem;
+    }
+}
+
+@media (max-width: 576px) {
+    .hero-section h1 {
+        font-size: 1.75rem;
+    }
+
+    .why-section h2 {
+        font-size: 1.75rem;
+    }
+
+    .navbar-brand {
+        font-size: 1.1rem;
+    }
+}
+

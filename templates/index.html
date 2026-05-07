@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+
+{% block title %}Home - Solo Parent DSS{% endblock %}
+
+{% block content %}
+<!-- Hero Section -->
+<section class="hero-section py-5 text-center">
+    <div class="container">
+        <h1 class="display-4 mb-3">Solo Parent Eligibility Assessment</h1>
+        <p class="lead mb-5">
+            Discover if you qualify for Solo Parent benefits under the Philippine Solo Parent
+            Welfare Act (RA 11861) in minutes—no account, no paperwork, just answers.
+        </p>
+        <a href="/assessment" class="btn btn-danger btn-lg px-5">Start Assessment <i class="fas fa-arrow-right ms-2"></i></a>
+    </div>
+</section>
+
+<!-- Benefits Section (Republic Act 11861) -->
+<section class="benefits-section py-5">
+    <div class="container">
+        <div class="row">
+            <div class="col-md-6 mb-4">
+                <h3 class="mb-4"><i class="fas fa-file-alt"></i> Republic Act 11861</h3>
+                <p class="mb-4">The Solo Parent Welfare Act ensures comprehensive support to qualified solo parents.</p>
+                <ul class="benefits-list">
+                    <li><strong>₱1,500 Monthly Subsidy</strong> - Financial assistance for children's daily needs</li>
+                    <li><strong>VAT Exemption & Discounts</strong> - Tax benefits and value-added tax exemption</li>
+                    <li><strong>Priority Access</strong> - Priority to hospital, government offices, and social services</li>
+                    <li><strong>Educational Support</strong> - Tuition assistance and scholarship programs</li>
+                </ul>
+            </div>
+            <div class="col-md-6">
+                <h3 class="mb-4"><i class="fas fa-cogs"></i> How It Works</h3>
+                <div class="process-steps">
+                    <div class="step">
+                        <div class="step-number">1</div>
+                        <h5>Input Data</h5>
+                        <p>Share your basic personal, income, and household details</p>
+                    </div>
+                    <div class="step">
+                        <div class="step-number">2</div>
+                        <h5>AI Analysis</h5>
+                        <p>Our system analyzes your data against RA 11861 criteria</p>
+                    </div>
+                    <div class="step">
+                        <div class="step-number">3</div>
+                        <h5>Eligibility Result</h5>
+                        <p>Receive instant eligibility status and applicable benefits</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- Why Use This System -->
+<section class="why-section py-5 bg-light">
+    <div class="container">
+        <h2 class="text-center mb-5">Why Use This System?</h2>
+        <p class="text-center text-muted mb-5">
+            Traditional eligibility processes can take weeks. Our AI-driven approach delivers results in
+            minutes while maintaining accuracy and compliance.
+        </p>
+        <div class="row">
+            <div class="col-md-4 text-center">
+                <div class="feature-icon">
+                    <i class="fas fa-clock"></i>
+                </div>
+                <h5>Speed</h5>
+                <p>Get instant results in under 5 minutes instead of waiting weeks for manual review</p>
+            </div>
+            <div class="col-md-4 text-center">
+                <div class="feature-icon">
+                    <i class="fas fa-balance-scale"></i>
+                </div>
+                <h5>Objectivity</h5>
+                <p>Rule-free AI evaluation ensures fair and consistent decisions based on RA 11861 criteria</p>
+            </div>
+            <div class="col-md-4 text-center">
+                <div class="feature-icon">
+                    <i class="fas fa-bullseye"></i>
+                </div>
+                <h5>Precision</h5>
+                <p>99.7% accuracy in matching legal criteria, reducing errors and application rejections</p>
+            </div>
+        </div>
+    </div>
+</section>
+{% endblock %}
