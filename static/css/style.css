@@ -54,8 +54,8 @@ main {
 
 /* ============ Hero Section ============ */
 .hero-section {
-    background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-dark) 100%);
-    color: white;
+    background-color: #d9e9f7;
+    color: var(--text-color);
     padding: 5rem 0 !important;
 }
 
@@ -63,13 +63,14 @@ main {
     font-size: 2.8rem;
     font-weight: 700;
     margin-bottom: 1rem;
-    color: white;
+    color: var(--text-color);
 }
 
 .hero-section .lead {
     font-size: 1.1rem;
     margin-bottom: 2rem;
-    opacity: 0.95;
+    opacity: 0.85;
+    color: #555;
 }
 
 .btn-danger {
