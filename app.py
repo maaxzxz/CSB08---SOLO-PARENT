@@ -1,13 +1,14 @@
-from flask import Flask, render_template, request, redirect, url_for, send_file
+from flask import Flask, render_template, request, send_file
 from datetime import datetime
-from reportlab.lib.pagesizes import letter, A4
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.pagesizes import A4, legal
 from reportlab.lib.units import inch
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
 from reportlab.lib import colors
+from reportlab.pdfgen import canvas
+from reportlab.pdfbase.pdfmetrics import stringWidth
 from io import BytesIO
 import json
 import os
+import textwrap
 
 app = Flask(__name__)
 app.secret_key = 'solo-parent-dss-key'
@@ -16,11 +17,11 @@ app.secret_key = 'solo-parent-dss-key'
 BENEFITS = {
     'monthly_subsidy': {
         'name': 'Monthly Subsidy',
-        'description': '₱1,500 cash assistance per child (benefit of 3 children)'
+        'description': 'PHP 1,500 cash assistance per child, subject to official guidelines'
     },
     'vat_exemption': {
         'name': 'VAT Exemption & Discounts',
-        'description': 'VAT discount and VAT exemption on goods/services'
+        'description': 'VAT discount and VAT exemption on qualified goods and services'
     },
     'educational_support': {
         'name': 'Educational Support',
@@ -28,12 +29,13 @@ BENEFITS = {
     },
     'priority_services': {
         'name': 'Priority Services',
-        'description': 'Exclusive access to government services'
+        'description': 'Priority access to government services'
     }
 }
 
+
 def calculate_age(birthdate_str):
-    """Calculate age from birthdate string (YYYY-MM-DD format)"""
+    """Calculate age from birthdate string YYYY-MM-DD format"""
     try:
         birthdate = datetime.strptime(birthdate_str, '%Y-%m-%d')
         today = datetime.today()
@@ -42,12 +44,22 @@ def calculate_age(birthdate_str):
     except:
         return 0
 
+
 def parse_family_members(form_data):
-    """Parse family members from form data"""
+    """Parse family members safely, even if rows are deleted"""
     family_members = []
-    index = 0
-    while f'family_name_{index}' in form_data:
+
+    indexes = []
+    for key in form_data.keys():
+        if key.startswith('family_name_'):
+            try:
+                indexes.append(int(key.replace('family_name_', '')))
+            except:
+                pass
+
+    for index in sorted(indexes):
         name = form_data.get(f'family_name_{index}', '').strip()
+
         if name:
             family_members.append({
                 'name': name,
@@ -58,8 +70,9 @@ def parse_family_members(form_data):
                 'education': form_data.get(f'family_educ_{index}', ''),
                 'occupation': form_data.get(f'family_occupation_{index}', '')
             })
-        index += 1
+
     return family_members
+
 
 def assess_eligibility(data):
     """
@@ -76,6 +89,7 @@ def assess_eligibility(data):
 
     # Extract personal information
     first_name = data.get('first_name', '').strip()
+    middle_name = data.get('middle_name', '').strip()
     surname = data.get('surname', '').strip()
     birthday = data.get('birthday', '')
     sex = data.get('sex', '')
@@ -83,10 +97,24 @@ def assess_eligibility(data):
     contact_no = data.get('contact_no', '').strip()
     civil_status = data.get('civil_status', '')
     occupation = data.get('occupation', '').strip()
-    monthly_income = float(data.get('monthly_income', 0))
-    total_family_income = float(data.get('total_family_income', 0))
+
+    try:
+        monthly_income = float(data.get('monthly_income', 0))
+    except:
+        monthly_income = 0
+
+    try:
+        total_family_income = float(data.get('total_family_income', 0))
+    except:
+        total_family_income = 0
+
     solo_parent_status = data.get('solo_parent_status', '')
-    number_of_children = int(data.get('number_of_dependent_children', 0))
+
+    try:
+        number_of_children = int(data.get('number_of_dependent_children', 0))
+    except:
+        number_of_children = 0
+
     solo_parent_reason = data.get('solo_parent_reason', '').strip()
 
     # Calculate applicant age
@@ -97,23 +125,40 @@ def assess_eligibility(data):
 
     # Store applicant info
     result['applicant_info'] = {
-        'name': f"{first_name} {surname}",
+        'first_name': first_name,
+        'middle_name': middle_name,
+        'surname': surname,
+        'name': f"{first_name} {middle_name} {surname}".replace('  ', ' ').strip(),
+
+        'birthday': birthday,
+        'birth_place': data.get('birthplace', '').strip(),
         'age': age,
+        'sex': sex.title(),
+
         'address': address,
         'contact': contact_no,
+        'landline': data.get('landline', '').strip(),
+
         'civil_status': civil_status,
+        'education': data.get('educational_attainment', '').strip(),
+        'religion': data.get('religion', '').strip(),
+
         'occupation': occupation,
+        'employer': data.get('employer_name', '').strip(),
+        'company_address': data.get('company_address', '').strip(),
+        'office_contact': data.get('office_contact', '').strip(),
+
         'monthly_income': monthly_income,
-        'solo_parent_status': solo_parent_status.title()
+        'total_family_income': total_family_income,
+
+        'solo_parent_status': solo_parent_status.title(),
+        'solo_parent_reason': solo_parent_reason,
+        'number_of_children': number_of_children
     }
+
     result['family_members'] = family_members
 
-    # RA 11861 Eligibility Criteria:
-    # 1. Must be a solo parent (widowed, abandoned, separated, single parent with child)
-    # 2. Must have dependent children
-    # 3. Income threshold (typically below or near poverty line)
-    # 4. Must be at least 21 years old (or at least supporting a minor child)
-
+    # RA 11861 Eligibility Criteria
     has_valid_status = solo_parent_status in [
         'widowed',
         'abandoned',
@@ -121,21 +166,18 @@ def assess_eligibility(data):
         'single'
     ]
 
-    # Income threshold - baseline is ₱30,000/month
-    # Can be adjusted based on family size and region
+    # Income threshold
     income_threshold = 30000
     adjusted_threshold = income_threshold + (number_of_children * 5000)
 
-    # ELIGIBILITY DECISION LOGIC
-
     # Automatic eligible criteria
-    if (has_valid_status and
+    if (
+        has_valid_status and
         number_of_children > 0 and
         total_family_income < adjusted_threshold and
-        age >= 18):  # Can be 18+ if supporting minors
-
+        age >= 18
+    ):
         result['eligible'] = True
-        # All RA 11861 benefits apply
         result['benefits'] = [
             BENEFITS['monthly_subsidy'],
             BENEFITS['vat_exemption'],
@@ -143,12 +185,13 @@ def assess_eligibility(data):
             BENEFITS['priority_services']
         ]
 
-    # Needs verification criteria (borderline cases)
-    elif (has_valid_status and
-          number_of_children > 0 and
-          total_family_income < (adjusted_threshold + 10000) and
-          age >= 18):
-
+    # Needs verification criteria
+    elif (
+        has_valid_status and
+        number_of_children > 0 and
+        total_family_income < (adjusted_threshold + 10000) and
+        age >= 18
+    ):
         result['needs_verification'] = True
         result['eligible'] = False
 
@@ -175,265 +218,531 @@ def assessment_form():
 @app.route('/submit-assessment', methods=['POST'])
 def submit_assessment():
     """Process form submission and show results"""
-    # Get form data
     form_data = request.form.to_dict()
-
-    # Run assessment
     result = assess_eligibility(form_data)
 
-    # Store result in session for PDF download
-    request.session_data = result
-
-    # Render result page
     return render_template('result.html', result=result)
 
 
 def generate_pdf(result):
-    """Generate PDF in questionnaire format"""
+    """Generate long PDF in Solo Parent Application Form style"""
     buffer = BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=letter,
-                           rightMargin=0.5*inch, leftMargin=0.5*inch,
-                           topMargin=0.5*inch, bottomMargin=0.5*inch)
 
-    # Container for PDF elements
-    elements = []
-    styles = getSampleStyleSheet()
+    # Custom long paper: 8.5 inches wide x 22 inches long
+    LONG_PAPER = (8.5 * inch, 22 * inch)
 
-    # Custom styles
-    title_style = ParagraphStyle(
-        'CustomTitle',
-        parent=styles['Heading1'],
-        fontSize=14,
-        textColor=colors.HexColor('#002d5f'),
-        spaceAfter=12,
-        alignment=1,  # Center
-        fontName='Helvetica-Bold'
+    c = canvas.Canvas(buffer, pagesize=LONG_PAPER)
+    width, height = LONG_PAPER
+
+    app_info = result.get('applicant_info', {})
+    family_members = result.get('family_members', [])
+
+    # ---------- Helper functions ----------
+    def safe(value):
+        if value is None:
+            return ""
+        return str(value)
+
+    def money(value):
+        try:
+            return f"PHP {float(value):,.0f}"
+        except:
+            return ""
+
+    def line(x1, y, x2):
+        c.line(x1, y, x2, y)
+
+    def label_value(label, value, x, y, line_start, line_end, font_size=9):
+        c.setFont("Times-Roman", font_size)
+        c.drawString(x, y, label)
+        line(line_start, y - 2, line_end)
+        c.drawString(line_start + 3, y + 1, safe(value)[:60])
+
+    def checkbox(x, y, text, checked=False):
+        c.rect(x, y - 2, 8, 8)
+
+        if checked:
+            c.setFont("Helvetica-Bold", 8)
+            c.drawString(x + 1.5, y - 1.5, "X")
+
+        c.setFont("Times-Roman", 9)
+        c.drawString(x + 12, y - 1, text)
+
+    def draw_text_in_cell(text, x, y, w, h, font_size=7, center=False):
+        text = safe(text)
+        c.setFont("Times-Roman", font_size)
+
+        max_chars = max(8, int(w / 4))
+        lines = textwrap.wrap(text, width=max_chars)
+
+        start_y = y + h - 11
+
+        for line_text in lines[:2]:
+            if center:
+                text_width = stringWidth(line_text, "Times-Roman", font_size)
+                c.drawString(x + (w - text_width) / 2, start_y, line_text)
+            else:
+                c.drawString(x + 3, start_y, line_text)
+
+            start_y -= 8
+
+    def draw_wrapped_text(text, x, y, max_chars=110, line_height=11, font_name="Times-Roman", font_size=8):
+        c.setFont(font_name, font_size)
+        lines = textwrap.wrap(safe(text), width=max_chars)
+
+        for text_line in lines:
+            c.drawString(x, y, text_line)
+            y -= line_height
+
+        return y
+
+    def status_text():
+        if result.get('eligible'):
+            return "ELIGIBLE"
+        elif result.get('needs_verification'):
+            return "NEEDS VERIFICATION"
+        else:
+            return "NOT CURRENTLY ELIGIBLE"
+
+    # ---------- Page settings ----------
+    margin_left = 25
+    margin_right = 25
+    top = height - 35
+
+    c.setStrokeColor(colors.black)
+    c.setFillColor(colors.black)
+
+    # ---------- Header ----------
+    c.setFont("Times-Roman", 9)
+    c.drawCentredString(width / 2, top, "Republic of the Philippines")
+    c.drawCentredString(width / 2, top - 12, "Province of Laguna")
+
+    c.setFont("Times-Italic", 8.5)
+    c.drawCentredString(
+        width / 2,
+        top - 27,
+        "For Solo Parent Eligibility Assessment under Republic Act No. 11861"
     )
 
-    heading_style = ParagraphStyle(
-        'CustomHeading',
-        parent=styles['Heading2'],
-        fontSize=11,
-        textColor=colors.HexColor('#002d5f'),
-        spaceAfter=10,
-        fontName='Helvetica-Bold'
-    )
+    c.setFont("Times-Bold", 13)
+    c.drawCentredString(width / 2, top - 50, "SOLO PARENT APPLICATION FORM")
 
-    normal_style = ParagraphStyle(
-        'CustomNormal',
-        parent=styles['Normal'],
-        fontSize=9,
-        spaceAfter=4
-    )
+    c.setFont("Times-Roman", 10)
+    c.drawString(210, top - 67, "Application Number:")
+    line(320, top - 68, 430)
 
-    app_info = result['applicant_info']
+    # Picture box
+    pic_x = width - 115
+    pic_y = top - 82
+    c.rect(pic_x, pic_y, 70, 82)
 
-    # Header
-    elements.append(Paragraph("SOLO PARENT ASSESSMENT & ELIGIBILITY REPORT", title_style))
-    elements.append(Paragraph("Republic of the Philippines - Department of Social Welfare and Development", normal_style))
-    elements.append(Paragraph(f"Assessment Date: {datetime.now().strftime('%B %d, %Y')}", normal_style))
-    elements.append(Spacer(1, 0.2*inch))
+    c.setFont("Times-Roman", 9)
+    c.drawCentredString(pic_x + 35, pic_y + 58, "1x1 id pic")
+    c.drawCentredString(pic_x + 35, pic_y + 38, "Solo Parent")
+    c.drawCentredString(pic_x + 35, pic_y + 22, "Applicant")
 
-    # SECTION I: IDENTIFYING INFORMATION
-    elements.append(Paragraph("I. IDENTIFYING INFORMATION", heading_style))
+    # ---------- I. Identifying Information ----------
+    y = top - 112
 
-    id_data = [
-        ['Full Name:', f"{app_info['name']}"],
-        ['Age / Sex:', f"{app_info['age']} years old"],
-        ['Civil Status:', app_info['civil_status'].title()],
-        ['Address:', app_info['address']],
-        ['Contact No.:', app_info['contact']],
-        ['Occupation:', app_info['occupation']],
-        ['Monthly Income:', f"PHP {app_info['monthly_income']:,.2f}"],
-        ['Solo Parent Status:', app_info['solo_parent_status']],
+    c.setFont("Times-Bold", 10)
+    c.drawString(margin_left, y, "I.")
+    c.drawString(margin_left + 35, y, "IDENTIFYING INFORMATION")
+
+    y -= 24
+
+    # Name line
+    c.setFont("Times-Roman", 9)
+    c.drawString(margin_left + 45, y, "Name")
+    c.drawString(margin_left + 105, y, ":")
+    line(margin_left + 150, y - 2, width - 150)
+
+    c.drawString(margin_left + 165, y + 1, safe(app_info.get('first_name', ''))[:16])
+    c.drawString(margin_left + 280, y + 1, safe(app_info.get('middle_name', ''))[:16])
+    c.drawString(margin_left + 405, y + 1, safe(app_info.get('surname', ''))[:16])
+
+    c.setFont("Times-Roman", 8)
+    c.drawString(margin_left + 185, y - 12, "(First Name)")
+    c.drawString(margin_left + 300, y - 12, "(Middle Name)")
+    c.drawString(margin_left + 425, y - 12, "(Surname)")
+
+    y -= 28
+    label_value("Birthday", safe(app_info.get('birthday', '')), margin_left + 45, y, margin_left + 150, margin_left + 250)
+    label_value("Age", safe(app_info.get('age', '')), margin_left + 285, y, margin_left + 325, margin_left + 380)
+    label_value("Sex", safe(app_info.get('sex', '')), margin_left + 420, y, margin_left + 455, width - 150)
+
+    y -= 16
+    label_value("Birth Place", safe(app_info.get('birth_place', '')), margin_left + 45, y, margin_left + 150, width - 150)
+
+    y -= 16
+    label_value("Address", safe(app_info.get('address', '')), margin_left + 45, y, margin_left + 150, width - 150)
+
+    y -= 16
+    c.setFont("Times-Roman", 9)
+    c.drawString(margin_left + 45, y, "Civil Status")
+    c.drawString(margin_left + 105, y, ":")
+
+    civil = safe(app_info.get('civil_status', '')).lower()
+
+    checkbox(margin_left + 150, y, "Single", "single" in civil)
+    checkbox(margin_left + 215, y, "Married/Separated", "married" in civil or "separated" in civil)
+    checkbox(margin_left + 345, y, "Annulled", "annulled" in civil)
+    checkbox(margin_left + 430, y, "Widow", "widow" in civil or "widowed" in civil)
+
+    y -= 16
+    label_value("Educ. Attainment", safe(app_info.get('education', '')), margin_left + 45, y, margin_left + 150, margin_left + 280)
+    label_value("Religion", safe(app_info.get('religion', '')), margin_left + 300, y, margin_left + 360, margin_left + 400)
+    label_value("Monthly Income", money(app_info.get('monthly_income', 0)), margin_left + 410, y, margin_left + 490, width - 35)
+
+    y -= 16
+    label_value("Occupation", safe(app_info.get('occupation', '')), margin_left + 45, y, margin_left + 150, width - 150)
+
+    y -= 16
+    label_value("Name of Employer", safe(app_info.get('employer', '')), margin_left + 45, y, margin_left + 150, width - 150)
+
+    y -= 16
+    label_value("Company Address", safe(app_info.get('company_address', '')), margin_left + 45, y, margin_left + 150, width - 150)
+
+    y -= 16
+    label_value("Office Contact No.", safe(app_info.get('office_contact', '')), margin_left + 45, y, margin_left + 150, margin_left + 315)
+    label_value("Contact No.", safe(app_info.get('contact', '')), margin_left + 330, y, margin_left + 400, width - 150)
+
+    y -= 16
+    label_value("Landline No.", safe(app_info.get('landline', '')), margin_left + 330, y, margin_left + 400, width - 150)
+
+    # ---------- II. Family Composition ----------
+    y -= 26
+
+    c.setFont("Times-Bold", 10)
+    c.drawString(margin_left, y, "II.")
+    c.drawString(margin_left + 35, y, "FAMILY COMPOSITION")
+
+    table_x = margin_left
+    table_w = width - (margin_left + margin_right)
+
+    header_h = 32
+    row_h = 22
+    rows = 8
+    table_height = header_h + (rows * row_h) + row_h
+    table_y = y - table_height - 8
+
+    col_widths = [
+        130,
+        75,
+        70,
+        32,
+        65,
+        75,
+        table_w - (130 + 75 + 70 + 32 + 65 + 75)
     ]
 
-    id_table = Table(id_data, colWidths=[2*inch, 4*inch])
-    id_table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#f0f0f0')),
-        ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
-        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, -1), 8),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-        ('TOPPADDING', (0, 0), (-1, -1), 6),
-        ('GRID', (0, 0), (-1, -1), 1, colors.grey),
-    ]))
+    headers = [
+        "NAMES",
+        "RELATIONSHIP",
+        "BIRTHDAY",
+        "AGE",
+        "STATUS",
+        "EDUC.\nATTNMENT",
+        "OCCUPATION/\nMONTHLY\nINCOME"
+    ]
 
-    elements.append(id_table)
-    elements.append(Spacer(1, 0.15*inch))
+    # Outer table
+    c.rect(table_x, table_y, table_w, table_height)
 
-    # SECTION II: FAMILY COMPOSITION
-    elements.append(Paragraph("II. FAMILY COMPOSITION", heading_style))
+    # Header separator
+    header_bottom_y = table_y + row_h + (rows * row_h)
+    c.line(table_x, header_bottom_y, table_x + table_w, header_bottom_y)
 
-    if result['family_members']:
-        family_data = [['Name', 'Relationship', 'Age', 'Civil Status', 'Education', 'Occupation/Income']]
-        for member in result['family_members']:
-            family_data.append([
-                member.get('name', ''),
-                member.get('relationship', ''),
-                str(member.get('age', '')),
-                member.get('civil_status', ''),
-                member.get('education', ''),
-                member.get('occupation', '')
-            ])
+    # Row lines
+    for i in range(rows + 1):
+        y_line = table_y + row_h + (i * row_h)
+        c.line(table_x, y_line, table_x + table_w, y_line)
 
-        family_table = Table(family_data, colWidths=[1.3*inch, 1.1*inch, 0.7*inch, 0.9*inch, 0.9*inch, 1.1*inch])
-        family_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#002d5f')),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 7),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
-            ('TOPPADDING', (0, 0), (-1, -1), 4),
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f9f9f9')]),
-        ]))
+    # Column lines
+    current_x = table_x
+    for w in col_widths[:-1]:
+        current_x += w
+        c.line(current_x, table_y, current_x, table_y + table_height)
 
-        elements.append(family_table)
-    elements.append(Spacer(1, 0.15*inch))
+    # Headers
+    current_x = table_x
+    for i, header in enumerate(headers):
+        c.setFont("Times-Bold", 7.5)
 
-    # SECTION III: ELIGIBILITY ASSESSMENT RESULT
-    elements.append(Paragraph("III. ELIGIBILITY ASSESSMENT RESULT", heading_style))
+        header_lines = header.split("\n")
+        line_y = header_bottom_y + 20
 
-    if result['eligible']:
-        status_text = "ELIGIBLE FOR SOLO PARENT BENEFITS"
-        status_color = colors.HexColor('#28a745')
-    elif result['needs_verification']:
-        status_text = "NEEDS VERIFICATION"
-        status_color = colors.HexColor('#ffc107')
-    else:
-        status_text = "NOT CURRENTLY ELIGIBLE"
-        status_color = colors.HexColor('#dc3545')
+        for header_line in header_lines:
+            text_width = stringWidth(header_line, "Times-Bold", 7.5)
+            c.drawString(current_x + (col_widths[i] - text_width) / 2, line_y, header_line)
+            line_y -= 8
 
-    result_style = ParagraphStyle(
-        'ResultStatus',
-        parent=styles['Normal'],
-        fontSize=11,
-        textColor=status_color,
-        fontName='Helvetica-Bold',
-        spaceAfter=8
+        current_x += col_widths[i]
+
+    # Family member rows
+    for row_index in range(rows):
+        member = family_members[row_index] if row_index < len(family_members) else {}
+        row_bottom = table_y + row_h + ((rows - 1 - row_index) * row_h)
+
+        values = [
+            member.get('name', ''),
+            member.get('relationship', ''),
+            member.get('birthday', ''),
+            member.get('age', ''),
+            member.get('civil_status', ''),
+            member.get('education', ''),
+            member.get('occupation', '')
+        ]
+
+        current_x = table_x
+
+        for col_index, value in enumerate(values):
+            draw_text_in_cell(
+                value,
+                current_x,
+                row_bottom,
+                col_widths[col_index],
+                row_h,
+                font_size=7
+            )
+            current_x += col_widths[col_index]
+
+    # Total family income row
+    c.setFont("Times-Bold", 8)
+    c.drawRightString(table_x + table_w - 160, table_y + 8, "TOTAL FAMILY INCOME")
+
+    c.setFont("Times-Roman", 8)
+    c.drawString(table_x + table_w - 130, table_y + 8, money(app_info.get('total_family_income', 0)))
+
+    c.setFont("Times-Italic", 8)
+    c.drawString(
+        margin_left + 30,
+        table_y - 14,
+        "* Please include other members of the household aside from family members"
     )
 
-    elements.append(Paragraph(f"Status: {status_text}", result_style))
+    # ---------- III. Circumstances ----------
+    y = table_y - 40
 
-    result_info = f"""
-    This assessment is based on the applicant's information against Republic Act 11861 (Solo Parent Welfare Act) criteria.
-    The evaluation considers family income, number of dependents, employment status, and solo parent classification.
-    """
-    elements.append(Paragraph(result_info, normal_style))
-    elements.append(Spacer(1, 0.1*inch))
+    c.setFont("Times-Bold", 10)
+    c.drawString(margin_left, y, "III.")
+    c.drawString(margin_left + 35, y, "CIRCUMSTANCES / REASONS OF BEING A SOLO PARENT")
 
-    # SECTION IV: QUALIFIED BENEFITS
-    if result['eligible'] and result['benefits']:
-        elements.append(Paragraph("IV. QUALIFIED BENEFITS UNDER RA 11861", heading_style))
+    y -= 24
 
-        benefits_data = []
-        for i, benefit in enumerate(result['benefits'], 1):
-            benefits_data.append([
-                f"{i}.",
-                Paragraph(f"<b>{benefit['name']}</b><br/>{benefit['description']}", normal_style)
-            ])
+    reason = safe(app_info.get('solo_parent_reason', ''))
+    reason_lines = textwrap.wrap(reason, width=110)
 
-        benefits_table = Table(benefits_data, colWidths=[0.4*inch, 5.6*inch])
-        benefits_table.setStyle(TableStyle([
-            ('ALIGN', (0, 0), (0, -1), 'CENTER'),
-            ('ALIGN', (1, 0), (1, -1), 'LEFT'),
-            ('FONTSIZE', (0, 0), (-1, -1), 8),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
-            ('TOPPADDING', (0, 0), (-1, -1), 8),
-            ('GRID', (0, 0), (-1, -1), 1, colors.grey),
-            ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#f0f8ff')),
-        ]))
+    for i in range(4):
+        line_y = y - (i * 18)
+        line(margin_left + 10, line_y - 2, width - 35)
 
-        elements.append(benefits_table)
-        elements.append(Spacer(1, 0.15*inch))
+        if i < len(reason_lines):
+            c.setFont("Times-Roman", 9)
+            c.drawString(margin_left + 15, line_y + 1, reason_lines[i])
 
-    # SECTION V: REQUIREMENTS & RECOMMENDATIONS
-    elements.append(Paragraph("V. REQUIREMENTS & RECOMMENDATIONS", heading_style))
+    # ---------- Consent paragraph ----------
+    consent_y = y - 88
 
-    if result['eligible']:
-        rec_text = """
-        <b>You are ELIGIBLE for Solo Parent Benefits.</b> Please prepare the following documents and visit your local DSWD office:
-        <br/><br/>
-        <b>Required Documents:</b><br/>
-        • Barangay Certificate confirming solo parent status<br/>
-        • Employment Certificate or Payslip (if employed)<br/>
-        • Affidavit of Solo Parent Status (notarized)<br/>
-        • Birth Certificate of all dependent children<br/>
-        • Death Certificate (if widowed) or Court Orders (if separated/annulled)<br/>
-        • Valid ID and Proof of Residence<br/>
-        • Tax Identification Number (TIN) if applicable<br/>
-        <br/>
-        <b>Next Steps:</b><br/>
-        1. Prepare and gather all required documents<br/>
-        2. Visit your local DSWD office with this assessment report<br/>
-        3. File your formal Solo Parent registration<br/>
-        4. Wait for processing (typically 30-45 days)<br/>
-        5. Claim your Solo Parent ID and start enjoying benefits<br/>
-        <br/>
-        <b>Eligible Benefits Include:</b><br/>
-        • ₱1,500/month subsidy per dependent child<br/>
-        • VAT exemption on goods and services<br/>
-        • Educational support and scholarships<br/>
-        • Priority access to government services<br/>
-        • Healthcare and wellness programs<br/>
-        """
+    consent_text = (
+        "By signing this document, I/we hereby grant my/our free, voluntary and unconditional consent "
+        "to the collection and processing of all Personal Data relating to me/us disclosed/transmitted "
+        "by me/us in person or by my/our authorized representative to the information database system "
+        "of the Municipal Social Welfare and Development Office and of the Municipal Government of "
+        "Santa Cruz, Laguna by its authorized officials and employees, by whatever means in accordance "
+        "with Republic Act 10173, otherwise known as the Data Privacy Act of 2012, including its "
+        "Implementing Rules and Regulations as well as issuances by the National Privacy Commission."
+    )
 
-    elif result['needs_verification']:
-        rec_text = """
-        <b>Your case REQUIRES VERIFICATION.</b> Additional documents are needed to complete your assessment.
-        <br/><br/>
-        <b>Documents for Verification:</b><br/>
-        • Updated income certificate from employer or barangay<br/>
-        • Proof of solo parent status (supporting documents)<br/>
-        • Birth Certificates of all dependent children<br/>
-        • Updated proof of residence<br/>
-        • Any additional documents supporting your circumstances<br/>
-        <br/>
-        <b>What to Do:</b><br/>
-        1. Gather the required verification documents<br/>
-        2. Contact your local DSWD office to schedule a verification interview<br/>
-        3. Bring this assessment report and all supporting documents<br/>
-        4. DSWD staff will conduct verification and provide final assessment<br/>
-        5. You will be notified of the results within 15 business days<br/>
-        """
+    c.setFont("Times-Italic", 7.5)
+    wrapped_consent = textwrap.wrap(consent_text, width=145)
 
+    for line_text in wrapped_consent:
+        c.drawString(margin_left + 35, consent_y, line_text)
+        consent_y -= 8
+
+    # ---------- Signature and thumb mark ----------
+    signature_y = consent_y - 30
+
+    line(width / 2 - 90, signature_y, width / 2 + 20)
+    c.setFont("Times-Roman", 8)
+    c.drawCentredString(width / 2 - 35, signature_y - 10, "Signature over Printed Name")
+
+    line(width / 2 + 45, signature_y, width / 2 + 120)
+    c.drawCentredString(width / 2 + 82, signature_y - 10, "Date")
+
+    thumb_x = width - 115
+    thumb_y = signature_y - 25
+
+    c.rect(thumb_x, thumb_y, 70, 60)
+    c.drawCentredString(thumb_x + 35, thumb_y - 12, "Right Thumb Mark")
+
+    # ---------- Requirements ----------
+    req_y_start = signature_y - 55
+    req_y = req_y_start
+
+    c.setFont("Times-Bold", 9)
+    c.drawString(margin_left, req_y, "REQUIREMENTS:")
+
+    requirements = [
+        "Barangay Certificate",
+        "Employment Certificate",
+        "Affidavit of being a solo parent",
+        "Birth Certificate (Minor Children/PWD)",
+        "Death Certificate (If Widow)",
+        "2 pcs. 1x1 Picture of the Applicant"
+    ]
+
+    c.setFont("Times-Roman", 8)
+    req_y -= 13
+
+    for item in requirements:
+        c.drawString(margin_left + 18, req_y, "-")
+        c.drawString(margin_left + 32, req_y, item)
+        req_y -= 11
+
+    # ---------- Small system assessment note ----------
+    note_x = width - 345
+    note_y = req_y_start
+
+    c.setFont("Times-Bold", 8)
+    c.drawString(note_x, note_y, "System Assessment Result:")
+
+    c.setFont("Times-Roman", 8)
+    c.drawString(note_x + 118, note_y, status_text())
+
+    c.setFont("Times-Italic", 6.5)
+    c.drawString(note_x, note_y - 13, "Final approval is still subject to MSWDO/DSWD verification.")
+
+    # ---------- V. Eligibility Result, Requirements & Recommendations ----------
+    y = req_y - 35
+
+    c.setFont("Times-Bold", 11)
+    c.drawString(margin_left, y, "V. REQUIREMENTS & RECOMMENDATIONS")
+
+    y -= 22
+
+    if result.get('eligible'):
+        intro_text = (
+            "You are ELIGIBLE for Solo Parent Benefits. Please prepare the following documents "
+            "and visit your local DSWD/MSWDO office:"
+        )
+    elif result.get('needs_verification'):
+        intro_text = (
+            "Your case REQUIRES VERIFICATION. Please prepare the following documents and visit "
+            "your local DSWD/MSWDO office for further assessment:"
+        )
     else:
-        rec_text = """
-        <b>You are currently NOT ELIGIBLE</b> based on the provided information and RA 11861 criteria.
-        <br/><br/>
-        <b>You may reapply if:</b><br/>
-        • Your income decreases significantly<br/>
-        • You lose your current employment<br/>
-        • You have additional dependent children<br/>
-        • Your family circumstances change<br/>
-        • You obtain additional supporting documents<br/>
-        <br/>
-        <b>Recommendations:</b><br/>
-        1. Contact your barangay social worker for other assistance programs<br/>
-        2. Explore other government support services you may qualify for<br/>
-        3. Consider reapplication when circumstances change<br/>
-        4. Keep this assessment for your records<br/>
-        """
+        intro_text = (
+            "You are currently NOT ELIGIBLE based on the system assessment. However, you may still "
+            "visit your local DSWD/MSWDO office for proper verification, guidance, or other available assistance programs."
+        )
 
-    elements.append(Paragraph(rec_text, normal_style))
-    elements.append(Spacer(1, 0.2*inch))
+    c.setFont("Times-Bold", 8.5)
+    if result.get('eligible'):
+        c.drawString(margin_left, y, "You are ELIGIBLE for Solo Parent Benefits.")
+        c.setFont("Times-Roman", 8.5)
+        c.drawString(margin_left + 175, y, "Please prepare the following documents and visit your local DSWD/MSWDO office:")
+        y -= 15
+    else:
+        y = draw_wrapped_text(intro_text, margin_left, y, max_chars=125, line_height=11, font_size=8.5)
+        y -= 5
 
-    # Footer
-    elements.append(Paragraph("_" * 80, normal_style))
-    footer_text = f"""
-    <b>Assessment Prepared By:</b> Solo Parent Decision Support System<br/>
-    <b>Assessment Date:</b> {datetime.now().strftime('%B %d, %Y at %I:%M %p')}<br/>
-    <b>Important Note:</b> This is an automated assessment based on RA 11861 criteria. Final determination of eligibility
-    is made by DSWD upon submission of complete documents and verification interview.
-    This report is valid for 12 months from the date of assessment.
-    """
-    elements.append(Paragraph(footer_text, ParagraphStyle('FooterStyle', parent=styles['Normal'], fontSize=7)))
+    c.setFont("Times-Bold", 8.5)
+    c.drawString(margin_left, y, "Required Documents:")
 
-    # Build PDF
-    doc.build(elements)
+    y -= 13
+
+    required_documents = [
+        "Barangay Certificate confirming solo parent status",
+        "Employment Certificate or Payslip, if employed",
+        "Affidavit of Solo Parent Status, notarized",
+        "Birth Certificate of all dependent children",
+        "Death Certificate if widowed, or Court Orders if separated/annulled",
+        "Valid ID and Proof of Residence",
+        "Tax Identification Number (TIN), if applicable"
+    ]
+
+    c.setFont("Times-Roman", 8.3)
+    for item in required_documents:
+        c.drawString(margin_left + 12, y, "- " + item)
+        y -= 11
+
+    y -= 8
+
+    c.setFont("Times-Bold", 8.5)
+    c.drawString(margin_left, y, "Next Steps:")
+
+    y -= 13
+
+    next_steps = [
+        "Prepare and gather all required documents.",
+        "Visit your local DSWD/MSWDO office with this assessment report.",
+        "File your formal Solo Parent registration.",
+        "Wait for document verification and processing.",
+        "Claim your Solo Parent ID once approved by the authorized office."
+    ]
+
+    c.setFont("Times-Roman", 8.3)
+    for i, step in enumerate(next_steps, 1):
+        c.drawString(margin_left + 12, y, f"{i}. {step}")
+        y -= 11
+
+    if result.get('eligible'):
+        y -= 8
+
+        c.setFont("Times-Bold", 8.5)
+        c.drawString(margin_left, y, "Eligible Benefits Include:")
+
+        y -= 13
+
+        eligible_benefits = [
+            "PHP 1,500/month subsidy per dependent child, subject to official guidelines",
+            "VAT exemption on qualified goods and services",
+            "Educational support and scholarship assistance",
+            "Priority access to government services",
+            "Healthcare and wellness programs"
+        ]
+
+        c.setFont("Times-Roman", 8.3)
+        for item in eligible_benefits:
+            c.drawString(margin_left + 12, y, "- " + item)
+            y -= 11
+
+    # ---------- Footer ----------
+    y -= 20
+
+    c.line(margin_left, y, width - margin_right, y)
+
+    y -= 14
+
+    c.setFont("Times-Bold", 7.5)
+    c.drawString(margin_left, y, "Assessment Prepared By:")
+
+    c.setFont("Times-Roman", 7.5)
+    c.drawString(margin_left + 100, y, "Solo Parent Decision Support System")
+
+    y -= 11
+
+    c.setFont("Times-Bold", 7.5)
+    c.drawString(margin_left, y, "Assessment Date:")
+
+    c.setFont("Times-Roman", 7.5)
+    c.drawString(margin_left + 75, y, datetime.now().strftime('%B %d, %Y at %I:%M %p'))
+
+    y -= 12
+
+    important_note = (
+        "Important Note: This is an automated assessment based on the encoded information and RA 11861-related criteria. "
+        "Final determination of eligibility is made by the authorized MSWDO/DSWD personnel upon submission of complete documents "
+        "and verification interview."
+    )
+
+    c.setFont("Times-Italic", 6.8)
+    draw_wrapped_text(important_note, margin_left, y, max_chars=140, line_height=9, font_size=6.8)
+
+    c.showPage()
+    c.save()
+
     buffer.seek(0)
     return buffer
 
@@ -441,15 +750,13 @@ def generate_pdf(result):
 @app.route('/download-pdf', methods=['POST'])
 def download_pdf():
     """Generate and download PDF report"""
-    # Get result from request
     result_json = request.form.get('result_data', '{}')
     result = json.loads(result_json)
 
-    # Generate PDF
     pdf_buffer = generate_pdf(result)
 
-    # Return PDF
     filename = f"Solo_Parent_Assessment_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+
     return send_file(
         pdf_buffer,
         mimetype='application/pdf',
@@ -460,5 +767,3 @@ def download_pdf():
 
 if __name__ == '__main__':
     app.run(debug=False, host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
-
-
