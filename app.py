@@ -438,14 +438,14 @@ def submit_assessment():
 
 
 def generate_pdf(result):
-    """Generate long PDF in Solo Parent Application Form style"""
+    """Generate PDF in Solo Parent Application Form style"""
     buffer = BytesIO()
 
-    # Custom long paper: 8.5 inches wide x 22 inches long
-    LONG_PAPER = (8.5 * inch, 22 * inch)
+    # Tabloid Paper: 11 inches wide x 17 inches long
+    TABLOID_PAPER = (11 * inch, 17 * inch)
 
-    c = canvas.Canvas(buffer, pagesize=LONG_PAPER)
-    width, height = LONG_PAPER
+    c = canvas.Canvas(buffer, pagesize=TABLOID_PAPER)
+    width, height = TABLOID_PAPER
 
     app_info = result.get('applicant_info', {})
     family_members = result.get('family_members', [])
@@ -543,8 +543,8 @@ def generate_pdf(result):
     c.drawCentredString(width / 2, top - 50, "SOLO PARENT APPLICATION FORM")
 
     c.setFont("Times-Roman", 10)
-    c.drawString(210, top - 67, "Application Number:")
-    line(320, top - 68, 430)
+    c.drawString(width / 2 - 100, top - 67, "Application Number:")
+    line(width / 2, top - 68, width / 2 + 100)
 
     # Picture box
     pic_x = width - 115
@@ -636,8 +636,9 @@ def generate_pdf(result):
 
     header_h = 32
     row_h = 22
-    rows = 8
-    table_height = header_h + (rows * row_h) + row_h
+    rows = max(1, len(family_members)) # Dynamically count rows, minimum 1
+    
+    table_height = header_h + (rows * row_h)
     table_y = y - table_height - 8
 
     col_widths = [
@@ -660,25 +661,25 @@ def generate_pdf(result):
         "OCCUPATION/\nMONTHLY\nINCOME"
     ]
 
-    # Outer table
+    # Outer table rectangle
     c.rect(table_x, table_y, table_w, table_height)
 
-    # Header separator
-    header_bottom_y = table_y + row_h + (rows * row_h)
+    # Header separator line
+    header_bottom_y = table_y + (rows * row_h)
     c.line(table_x, header_bottom_y, table_x + table_w, header_bottom_y)
 
-    # Row lines
-    for i in range(rows + 1):
-        y_line = table_y + row_h + (i * row_h)
+    # Internal horizontal row lines (only draw between data rows)
+    for i in range(1, rows):
+        y_line = table_y + (i * row_h)
         c.line(table_x, y_line, table_x + table_w, y_line)
 
-    # Column lines
+    # Column vertical lines
     current_x = table_x
     for w in col_widths[:-1]:
         current_x += w
         c.line(current_x, table_y, current_x, table_y + table_height)
 
-    # Headers
+    # Headers Text
     current_x = table_x
     for i, header in enumerate(headers):
         c.setFont("Times-Bold", 7.5)
@@ -693,10 +694,11 @@ def generate_pdf(result):
 
         current_x += col_widths[i]
 
-    # Family member rows
+    # Family member rows Text
     for row_index in range(rows):
         member = family_members[row_index] if row_index < len(family_members) else {}
-        row_bottom = table_y + row_h + ((rows - 1 - row_index) * row_h)
+        
+        row_bottom = table_y + ((rows - 1 - row_index) * row_h)
 
         values = [
             member.get('name', ''),
@@ -722,21 +724,28 @@ def generate_pdf(result):
             current_x += col_widths[col_index]
 
     # Total family income row
+    income_y_position = table_y - 15
+
     c.setFont("Times-Bold", 8)
-    c.drawRightString(table_x + table_w - 160, table_y + 8, "TOTAL FAMILY INCOME")
+    c.drawRightString(table_x + table_w - 80, income_y_position, "TOTAL FAMILY INCOME:")
 
     c.setFont("Times-Roman", 8)
-    c.drawString(table_x + table_w - 130, table_y + 8, money(app_info.get('total_family_income', 0)))
+    c.drawString(table_x + table_w - 75, income_y_position, money(app_info.get('total_family_income', 0)))
 
     c.setFont("Times-Italic", 8)
     c.drawString(
-        margin_left + 30,
-        table_y - 14,
+        table_x, 
+        income_y_position,
         "* Please include other members of the household aside from family members"
     )
 
     # ---------- III. Circumstances ----------
-    y = table_y - 40
+    y = table_y - 45 
+
+    # Page Break Check
+    if y < 150:
+        c.showPage()
+        y = height - 50
 
     c.setFont("Times-Bold", 10)
     c.drawString(margin_left, y, "III.")
@@ -756,6 +765,11 @@ def generate_pdf(result):
             c.drawString(margin_left + 15, line_y + 1, reason_lines[i])
 
     # ---------- Consent paragraph ----------
+    # Page Break Check
+    if y < 200:
+        c.showPage()
+        y = height - 40
+
     consent_y = y - 88
 
     consent_text = (
@@ -830,6 +844,11 @@ def generate_pdf(result):
 
     # ---------- V. Eligibility Result, Requirements & Recommendations ----------
     y = req_y - 35
+
+    # Page Break Check for Section V
+    if y < 320:
+        c.showPage()
+        y = height - 50
 
     c.setFont("Times-Bold", 11)
     c.drawString(margin_left, y, "V. REQUIREMENTS & RECOMMENDATIONS")
@@ -920,7 +939,9 @@ def generate_pdf(result):
 
         c.setFont("Times-Roman", 8.3)
         for item in eligible_benefits:
-            c.drawString(margin_left + 12, y, "- " + item)
+            # Draw an empty circle
+            c.circle(margin_left + 15, y + 3, 3.5, stroke=1, fill=0)
+            c.drawString(margin_left + 25, y, item)
             y -= 11
 
     # ---------- Footer ----------
@@ -953,7 +974,7 @@ def generate_pdf(result):
     )
 
     c.setFont("Times-Italic", 6.8)
-    draw_wrapped_text(important_note, margin_left, y, max_chars=140, line_height=9, font_size=6.8)
+    draw_wrapped_text(important_note, margin_left, y, max_chars=180, line_height=9, font_size=6.8)
 
     c.showPage()
     c.save()
