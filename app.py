@@ -9,9 +9,25 @@ from io import BytesIO
 import json
 import os
 import textwrap
+import joblib
+import pandas as pd
+import numpy as np
 
 app = Flask(__name__)
 app.secret_key = 'solo-parent-dss-key'
+
+# Load ML Model and Encoders at startup
+try:
+    ml_model = joblib.load('model/solo_parent_model.pkl')
+    ml_encoders = joblib.load('model/encoders.pkl')
+    ml_feature_columns = joblib.load('model/feature_columns.pkl')
+    ml_model_loaded = True
+except Exception as e:
+    print(f"Warning: Could not load ML model: {e}. Using rule-based assessment only.")
+    ml_model_loaded = False
+    ml_model = None
+    ml_encoders = None
+    ml_feature_columns = None
 
 # RA 11861 Defined Benefits
 BENEFITS = {
@@ -72,6 +88,127 @@ def parse_family_members(form_data):
             })
 
     return family_members
+
+
+def infer_employment_status(occupation_text):
+    """Infer employment status from occupation text field"""
+    if not occupation_text:
+        return 'Unemployed'
+
+    occ = occupation_text.lower().strip()
+
+    if occ == 'unemployed' or occ == 'none' or len(occ) == 0:
+        return 'Unemployed'
+    elif any(word in occ for word in ['own', 'self', 'business', 'freelance', 'vendor']):
+        return 'Self-Employed'
+    elif any(word in occ for word in ['part-time', 'pt', 'part time']):
+        return 'Part-Time'
+    else:
+        return 'Employed'
+
+
+def has_minor_dependents(family_members):
+    """Check if there are any minor dependents (age < 18)"""
+    for member in family_members:
+        try:
+            age = int(member.get('age', 0))
+            if age > 0 and age < 18:
+                return 'Yes'
+        except:
+            pass
+    return 'No'
+
+
+def extract_ml_features(form_data):
+    """Extract and transform form data to ML model features"""
+    family_members = parse_family_members(form_data)
+
+    try:
+        birthday = form_data.get('birthday', '')
+        age = calculate_age(birthday)
+    except:
+        age = 0
+
+    solo_parent_type = form_data.get('solo_parent_status', '').strip().lower()
+    solo_parent_map = {
+        'single': 'Unmarried',
+        'widowed': 'Widowed',
+        'separated': 'Separated',
+        'abandoned': 'Abandoned',
+        'ofw': 'OFW Spouse'
+    }
+    mapped_type = solo_parent_map.get(solo_parent_type, 'Unmarried')
+
+    features = {
+        'Age': age,
+        'Educational_Attainment': form_data.get('educational_attainment', '').strip() or 'Elementary',
+        'Employment_Status': infer_employment_status(form_data.get('occupation', '')),
+        'Monthly_Income': float(form_data.get('monthly_income', 0)),
+        'Number_of_Dependents': int(form_data.get('number_of_dependent_children', 0)),
+        'With_Minor': has_minor_dependents(family_members),
+        'With_PWD': form_data.get('with_pwd', 'No'),
+        'Type_of_Solo_Parent': mapped_type
+    }
+
+    return features
+
+
+def assess_eligibility_ml(form_data):
+    """ML-based eligibility assessment using pre-trained Random Forest model"""
+    if not ml_model_loaded:
+        return {
+            'eligible': False,
+            'confidence': 0.0,
+            'model_status': 'unavailable'
+        }
+
+    try:
+        features = extract_ml_features(form_data)
+
+        feature_df = pd.DataFrame([features])
+
+        for col in ml_encoders:
+            if col in feature_df.columns:
+                try:
+                    feature_df[col] = ml_encoders[col].transform(feature_df[col].astype(str))
+                except:
+                    feature_df[col] = 0
+
+        feature_df = feature_df[ml_feature_columns]
+
+        prediction = ml_model.predict(feature_df)[0]
+        probabilities = ml_model.predict_proba(feature_df)[0]
+
+        if len(ml_model.classes_) == 1:
+            confident_class = ml_model.classes_[0]
+            confident_prob = 1.0
+            other_prob = 0.0
+        else:
+            confident_prob = float(probabilities[1]) if len(probabilities) > 1 else float(probabilities[0])
+            other_prob = 1.0 - confident_prob
+
+        result = {
+            'eligible': bool(prediction == 1),
+            'confidence': confident_prob if prediction == 1 else other_prob,
+            'prob_eligible': confident_prob if prediction == 1 else other_prob,
+            'prob_not_eligible': other_prob if prediction == 1 else confident_prob,
+            'model_status': 'success'
+        }
+
+        return result
+    except Exception as e:
+        print(f"ML prediction error: {e}")
+        return {
+            'eligible': False,
+            'confidence': 0.0,
+            'model_status': 'error',
+            'error': str(e),
+            'prob_eligible': 0.0,
+            'prob_not_eligible': 1.0
+        }
+
+
+
 
 
 def assess_eligibility(data):
@@ -219,7 +356,83 @@ def assessment_form():
 def submit_assessment():
     """Process form submission and show results"""
     form_data = request.form.to_dict()
-    result = assess_eligibility(form_data)
+
+    ml_result = assess_eligibility_ml(form_data)
+
+    family_members = parse_family_members(form_data)
+    try:
+        birthday = form_data.get('birthday', '')
+        age = calculate_age(birthday)
+    except:
+        age = 0
+
+    try:
+        monthly_income = float(form_data.get('monthly_income', 0))
+    except:
+        monthly_income = 0
+
+    try:
+        total_family_income = float(form_data.get('total_family_income', 0))
+    except:
+        total_family_income = 0
+
+    try:
+        number_of_children = int(form_data.get('number_of_dependent_children', 0))
+    except:
+        number_of_children = 0
+
+    first_name = form_data.get('first_name', '').strip()
+    middle_name = form_data.get('middle_name', '').strip()
+    surname = form_data.get('surname', '').strip()
+
+    result = {
+        'eligible': ml_result['eligible'],
+        'confidence': ml_result['confidence'],
+        'needs_verification': False,
+        'decision_source': 'ML Model v1.0',
+        'ml_metadata': {
+            'confidence_score': ml_result['confidence'],
+            'prob_eligible': ml_result.get('prob_eligible', 0),
+            'prob_not_eligible': ml_result.get('prob_not_eligible', 1 - ml_result['confidence']),
+            'model_version': '1.0',
+            'model_status': ml_result.get('model_status', 'unknown')
+        },
+        'benefits': [],
+        'applicant_info': {
+            'first_name': first_name,
+            'middle_name': middle_name,
+            'surname': surname,
+            'name': f"{first_name} {middle_name} {surname}".replace('  ', ' ').strip(),
+            'birthday': form_data.get('birthday', ''),
+            'birth_place': form_data.get('birthplace', '').strip(),
+            'age': age,
+            'sex': form_data.get('sex', '').title(),
+            'address': form_data.get('address', '').strip(),
+            'contact': form_data.get('contact_no', '').strip(),
+            'landline': form_data.get('landline', '').strip(),
+            'civil_status': form_data.get('civil_status', ''),
+            'education': form_data.get('educational_attainment', '').strip(),
+            'religion': form_data.get('religion', '').strip(),
+            'occupation': form_data.get('occupation', '').strip(),
+            'employer': form_data.get('employer_name', '').strip(),
+            'company_address': form_data.get('company_address', '').strip(),
+            'office_contact': form_data.get('office_contact', '').strip(),
+            'monthly_income': monthly_income,
+            'total_family_income': total_family_income,
+            'solo_parent_status': form_data.get('solo_parent_status', '').title(),
+            'solo_parent_reason': form_data.get('solo_parent_reason', '').strip(),
+            'number_of_children': number_of_children
+        },
+        'family_members': family_members
+    }
+
+    if ml_result['eligible']:
+        result['benefits'] = [
+            {'name': 'Monthly Subsidy', 'description': 'PHP 1,500 cash assistance per child, subject to official guidelines'},
+            {'name': 'VAT Exemption & Discounts', 'description': 'VAT discount and VAT exemption on qualified goods and services'},
+            {'name': 'Educational Support', 'description': 'Assistance program for dependent children'},
+            {'name': 'Priority Services', 'description': 'Priority access to government services'}
+        ]
 
     return render_template('result.html', result=result)
 
@@ -298,11 +511,13 @@ def generate_pdf(result):
 
     def status_text():
         if result.get('eligible'):
-            return "ELIGIBLE"
+            confidence = result.get('confidence', 0)
+            return f"ELIGIBLE ({confidence:.1%} confidence)"
         elif result.get('needs_verification'):
             return "NEEDS VERIFICATION"
         else:
-            return "NOT CURRENTLY ELIGIBLE"
+            confidence = result.get('confidence', 0)
+            return f"NOT ELIGIBLE ({confidence:.1%} confidence)"
 
     # ---------- Page settings ----------
     margin_left = 25

@@ -16,7 +16,13 @@
                             <i class="fas fa-check-circle text-success"></i>
                         </div>
                         <h2 class="mb-2 text-center">Eligible for Solo Parent Benefits</h2>
-                        <p class="text-muted mb-5 text-center">Based on RA 11861 criteria, you qualify for the following benefits:</p>
+                        <p class="text-center mb-1"><strong>ML Assessment Result:</strong> <span class="badge bg-success">ELIGIBLE</span></p>
+                        <p class="text-center mb-4 text-muted">Confidence Score: <strong>{{ '%.1f%%' | format(result.confidence * 100) }}</strong></p>
+                        <div class="mb-4 confidence-bar">
+                            <div class="progress">
+                                <div class="progress-bar bg-success" role="progressbar" style="width: {{ result.confidence * 100 }}%" aria-valuenow="{{ result.confidence * 100 }}" aria-valuemin="0" aria-valuemax="100"></div>
+                            </div>
+                        </div>
 
                     {% elif result.needs_verification %}
                         <div class="result-icon mb-4 text-center">
@@ -30,7 +36,14 @@
                             <i class="fas fa-times-circle text-danger"></i>
                         </div>
                         <h2 class="mb-2 text-center">Currently Not Eligible</h2>
-                        <p class="text-muted mb-5 text-center">Based on the information provided, you may not meet the current eligibility criteria.</p>
+                        <p class="text-center mb-1"><strong>ML Assessment Result:</strong> <span class="badge bg-danger">NOT ELIGIBLE</span></p>
+                        <p class="text-center mb-4 text-muted">Confidence Score: <strong>{{ '%.1f%%' | format(result.confidence * 100) }}</strong></p>
+                        <div class="mb-4 confidence-bar">
+                            <div class="progress">
+                                <div class="progress-bar bg-danger" role="progressbar" style="width: {{ result.confidence * 100 }}%" aria-valuenow="{{ result.confidence * 100 }}" aria-valuemin="0" aria-valuemax="100"></div>
+                            </div>
+                        </div>
+                        <p class="text-muted mb-5 text-center">Based on the information provided and ML model analysis, you may not meet the current eligibility criteria.</p>
                     {% endif %}
 
                     <!-- Applicant Summary -->
@@ -51,6 +64,29 @@
                                     <p class="mb-0"><strong>Monthly Income:</strong> PHP {{ '{:,.0f}'.format(result.applicant_info.monthly_income) }}</p>
                                 </div>
                             </div>
+                        </div>
+                    </div>
+
+                    <!-- Model Assessment Information -->
+                    <div class="card mb-4 border-info">
+                        <div class="card-header bg-info text-white">
+                            <h6 class="mb-0"><i class="fas fa-robot"></i> Machine Learning Assessment</h6>
+                        </div>
+                        <div class="card-body small">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <p class="mb-2"><strong>Model Type:</strong> Random Forest Classifier</p>
+                                    <p class="mb-2"><strong>Model Version:</strong> 1.0</p>
+                                    <p class="mb-0"><strong>Model Status:</strong> <span class="badge bg-success">Active</span></p>
+                                </div>
+                                <div class="col-md-6">
+                                    <p class="mb-2"><strong>Eligibility Probability:</strong> {{ '%.1f%%' | format(result.ml_metadata.prob_eligible * 100) }}</p>
+                                    <p class="mb-2"><strong>Not Eligible Probability:</strong> {{ '%.1f%%' | format(result.ml_metadata.prob_not_eligible * 100) }}</p>
+                                    <p class="mb-0"><strong>Assessment Confidence:</strong> {{ '%.1f%%' | format(result.confidence * 100) }}</p>
+                                </div>
+                            </div>
+                            <hr>
+                            <p class="text-muted mb-0"><i class="fas fa-info-circle"></i> This assessment is based on a machine learning model trained on historical data. Final determination requires MSWDO/DSWD personnel verification.</p>
                         </div>
                     </div>
 
@@ -236,6 +272,26 @@
 
     .result-icon {
         font-size: 4rem;
+    }
+
+    .confidence-bar {
+        margin: 0 0 1rem 0;
+    }
+
+    .progress {
+        height: 30px;
+        background-color: #e9ecef;
+        border-radius: 8px;
+    }
+
+    .progress-bar {
+        font-size: 12px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        font-weight: bold;
+        transition: width 0.3s ease;
     }
 </style>
 {% endblock %}
