@@ -179,19 +179,34 @@ def assess_eligibility_ml(form_data):
         prediction = ml_model.predict(feature_df)[0]
         probabilities = ml_model.predict_proba(feature_df)[0]
 
-        if len(ml_model.classes_) == 1:
-            confident_class = ml_model.classes_[0]
-            confident_prob = 1.0
-            other_prob = 0.0
+        classes = list(ml_model.classes_)
+
+        # Single-class model (degenerate) - return full confidence
+        if len(classes) == 1:
+            prob_pred = 1.0
         else:
-            confident_prob = float(probabilities[1]) if len(probabilities) > 1 else float(probabilities[0])
-            other_prob = 1.0 - confident_prob
+            # Find probability for the predicted class (robust to class ordering)
+            try:
+                idx_pred = classes.index(prediction)
+                prob_pred = float(probabilities[idx_pred])
+            except ValueError:
+                # Fallback: take the max probability
+                prob_pred = float(max(probabilities))
+
+        # Determine probability that corresponds to the "eligible" label (1)
+        if 1 in classes:
+            prob_eligible = float(probabilities[classes.index(1)])
+        else:
+            # If there is no explicit class '1', infer from prediction
+            prob_eligible = prob_pred if prediction == 1 else (1.0 - prob_pred)
+
+        prob_not_eligible = 1.0 - prob_eligible
 
         result = {
             'eligible': bool(prediction == 1),
-            'confidence': confident_prob if prediction == 1 else other_prob,
-            'prob_eligible': confident_prob if prediction == 1 else other_prob,
-            'prob_not_eligible': other_prob if prediction == 1 else confident_prob,
+            'confidence': prob_pred,
+            'prob_eligible': prob_eligible,
+            'prob_not_eligible': prob_not_eligible,
             'model_status': 'success'
         }
 
@@ -433,6 +448,24 @@ def submit_assessment():
             {'name': 'Educational Support', 'description': 'Assistance program for dependent children'},
             {'name': 'Priority Services', 'description': 'Priority access to government services'}
         ]
+
+    # If ML predicts not eligible but rule-based logic qualifies the applicant,
+    # prefer the rule-based decision when ML confidence is low (avoid false negatives).
+    try:
+        rule_result = assess_eligibility(form_data)
+        ml_conf = float(ml_result.get('confidence', 0.0))
+
+        if (not ml_result.get('eligible', False)) and rule_result.get('eligible', False):
+            # If ML is not confident (threshold adjustable), override with rule-based
+            if ml_result.get('model_status') != 'success' or ml_conf < 0.60:
+                result['eligible'] = True
+                result['decision_source'] = 'Rule-Based Override'
+                result['needs_verification'] = rule_result.get('needs_verification', False)
+                result['benefits'] = rule_result.get('benefits', []) or result.get('benefits', [])
+                result['ml_metadata']['override'] = True
+                result['ml_metadata']['rule_conflict'] = True
+    except Exception as e:
+        print(f"Rule-based override check failed: {e}")
 
     return render_template('result.html', result=result)
 
