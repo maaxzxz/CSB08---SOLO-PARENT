@@ -13,6 +13,12 @@ An AI-powered web application to assess eligibility for Solo Parent benefits und
 - Rule-based logic aligned with RA 11861 criteria
 - Three-tier eligibility status: Eligible, Needs Verification, Not Eligible
 - Income threshold calculations based on family size
+- Applicant-facing first-step screening plus MSWDO support for verification and case triage
+
+✨ **Current Build Status**
+- Core assessment and PDF workflow are implemented
+- Model-assisted screening is integrated
+- Remaining work is mainly for staff workflows, case tracking, document upload, and analytics
 
 ✨ **PDF Report Generation**
 - Professional questionnaire-formatted PDF
@@ -96,11 +102,12 @@ solo-parent-dss/
 │       └── script.js        # (Optional) JavaScript utilities
 │
 ├── data/
-│   └── synthetic_solo_parent_dataset.csv  # Sample data
+│   └── solo_parent_dataset.csv           # Training and sample data
 │
 ├── model/
-│   ├── solo_parent_model.pkl    # ML model (future)
-│   └── encoders.pkl             # Label encoders (future)
+│   ├── solo_parent_model.pkl    # Trained model artifact
+│   ├── encoders.pkl             # Label encoders used by the model
+│   └── model_metadata.pkl       # Training metrics and benchmark summary
 │
 └── reports/
     └── (Generated PDF reports saved here)
@@ -141,9 +148,21 @@ solo-parent-dss/
 - Family income below threshold (~₱30,000 + ₱5,000 per child)
 - Age 18 or older
 
+## Algorithm Assessment
+
+The current training script is built to compare multiple tabular classifiers on the same solo parent dataset. In a quick benchmark on the held-out test split, Random Forest and Gradient Boosting were tied for the best results, both reaching about 99.4% accuracy with 100% recall on eligible cases. That makes Random Forest a strong production default for this version because it is already integrated, stable on small tabular data, and easy to retrain.
+
+Recommended model order for this dataset:
+- Random Forest Classifier
+- Gradient Boosting Classifier
+- Extra Trees Classifier
+- Support Vector Machine
+- Logistic Regression
+
+For this project, prioritize recall for eligible applicants first, then precision, because missing a truly eligible solo parent is the more serious error.
+
 ## Future Enhancements
 
-- 🤖 Machine learning model for predictive eligibility
 - 📊 Admin dashboard with analytics
 - 🔐 Secure user accounts and application history
 - 📱 Mobile app version

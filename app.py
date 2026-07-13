@@ -29,6 +29,11 @@ except Exception as e:
     ml_encoders = None
     ml_feature_columns = None
 
+try:
+    ml_model_metadata = joblib.load('model/model_metadata.pkl')
+except Exception:
+    ml_model_metadata = {}
+
 # RA 11861 Defined Benefits
 BENEFITS = {
     'monthly_subsidy': {
@@ -373,6 +378,9 @@ def submit_assessment():
     form_data = request.form.to_dict()
 
     ml_result = assess_eligibility_ml(form_data)
+    model_type = ml_model_metadata.get('model_type', 'ML Model')
+    model_version = ml_model_metadata.get('model_version', '1.0')
+    decision_source = f"{model_type} v{model_version}"
 
     family_members = parse_family_members(form_data)
     try:
@@ -404,12 +412,14 @@ def submit_assessment():
         'eligible': ml_result['eligible'],
         'confidence': ml_result['confidence'],
         'needs_verification': False,
-        'decision_source': 'ML Model v1.0',
+        'decision_source': decision_source,
         'ml_metadata': {
             'confidence_score': ml_result['confidence'],
             'prob_eligible': ml_result.get('prob_eligible', 0),
             'prob_not_eligible': ml_result.get('prob_not_eligible', 1 - ml_result['confidence']),
-            'model_version': '1.0',
+            'model_type': model_type,
+            'model_version': model_version,
+            'training_date': ml_model_metadata.get('training_date', ''),
             'model_status': ml_result.get('model_status', 'unknown')
         },
         'benefits': [],
