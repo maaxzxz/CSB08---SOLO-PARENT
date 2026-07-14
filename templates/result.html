@@ -12,38 +12,86 @@
                 <div class="card-body p-4">
                     <!-- Eligibility Result -->
                     {% if result.eligible %}
-                        <div class="result-icon mb-4 text-center">
-                            <i class="fas fa-check-circle text-success"></i>
-                        </div>
-                        <h2 class="mb-2 text-center">Eligible for Solo Parent Benefits</h2>
-                        <p class="text-center mb-1"><strong>ML Assessment Result:</strong> <span class="badge bg-success">ELIGIBLE</span></p>
-                        <p class="text-center mb-4 text-muted">Confidence Score: <strong>{{ '%.1f%%' | format(result.confidence * 100) }}</strong></p>
-                        <div class="mb-4 confidence-bar">
-                            <div class="progress">
-                                <div class="progress-bar bg-success" role="progressbar" style="width: {{ result.confidence * 100 }}%" aria-valuenow="{{ result.confidence * 100 }}" aria-valuemin="0" aria-valuemax="100"></div>
+                    <div class="result-icon mb-4 text-center">
+                        <i class="fas fa-check-circle text-success"></i>
+                    </div>
+                    <h2 class="mb-2 text-center">Eligible for Solo Parent Benefits</h2>
+                    {% if result.benefits %}
+                    <p class="text-center text-success mb-4 fs-5 fw-bold">Available Benefits You Can Receive:</p>
+                    {% endif %}
+
+                    <!-- Key Benefits Grid -->
+                    {% if result.benefits %}
+                    <div class="row g-3 mb-5 text-start justify-content-center">
+                        {% for benefit in result.benefits %}
+                            {% set displayed_name = benefit.name %}
+                            {% set is_pending = false %}
+                            {% if 'Pending Verification' in benefit.name %}
+                                {% set is_pending = true %}
+                                {% set displayed_name = benefit.name | replace(' (Pending Verification)', '') | replace('(Pending Verification)', '') | trim %}
+                            {% endif %}
+                            
+                            {% set name_lower = displayed_name | lower %}
+                            {% if 'subsidy' in name_lower %}
+                                {% set icon_class = 'fas fa-hand-holding-usd' %}
+                            {% elif 'vat' in name_lower or 'discount' in name_lower %}
+                                {% set icon_class = 'fas fa-tags' %}
+                            {% elif 'health' in name_lower or 'medical' in name_lower %}
+                                {% set icon_class = 'fas fa-heart' %}
+                            {% elif 'education' in name_lower or 'scholarship' in name_lower %}
+                                {% set icon_class = 'fas fa-graduation-cap' %}
+                            {% elif 'housing' in name_lower or 'home' in name_lower %}
+                                {% set icon_class = 'fas fa-home' %}
+                            {% elif 'work' in name_lower or 'schedule' in name_lower or 'leave' in name_lower %}
+                                {% set icon_class = 'fas fa-clock' %}
+                            {% else %}
+                                {% set icon_class = 'fas fa-check-circle' %}
+                            {% endif %}
+
+                            <div class="col-md-6 col-lg-4 d-flex align-items-stretch">
+                                <div class="card w-100 border-0 shadow-sm bg-light">
+                                    <div class="card-body p-3 d-flex flex-column justify-content-between">
+                                        <div>
+                                            <div class="d-flex align-items-center mb-2">
+                                                <div class="me-2 fs-5 text-success"><i class="{{ icon_class }}"></i></div>
+                                                <h6 class="mb-0 fw-bold text-success d-flex align-items-center flex-wrap" style="font-size: 0.95rem;">
+                                                    <span>{{ displayed_name }}</span>
+                                                    {% if is_pending %}
+                                                        <span class="badge bg-warning text-dark ms-2" style="font-size: 0.7rem; font-weight: 600;">Pending Verification</span>
+                                                    {% endif %}
+                                                </h6>
+                                            </div>
+                                            <p class="card-text small text-muted mb-0">{{ benefit.description }}</p>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
-                        </div>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+
+                    {% if result.needs_verification %}
+                    <div class="alert alert-warning text-center mx-auto mb-4" style="max-width: 650px;">
+                        <i class="fas fa-exclamation-triangle"></i> <strong>Notice:</strong> Your income is borderline.
+                        While you are eligible for Solo Parent status, your cash subsidy and VAT exemption benefits are
+                        subject to official LGU verification.
+                    </div>
+                    {% endif %}
 
                     {% elif result.needs_verification %}
-                        <div class="result-icon mb-4 text-center">
-                            <i class="fas fa-exclamation-circle text-warning"></i>
-                        </div>
-                        <h2 class="mb-2 text-center">Needs Verification</h2>
-                        <p class="text-muted mb-5 text-center">Your case requires further assessment. Additional documentation may be needed.</p>
+                    <div class="result-icon mb-4 text-center">
+                        <i class="fas fa-exclamation-circle text-warning"></i>
+                    </div>
+                    <h2 class="mb-2 text-center">Needs Verification</h2>
+                    <p class="text-muted mb-5 text-center">Your case requires further assessment. Additional
+                        documentation may be needed.</p>
 
                     {% else %}
-                        <div class="result-icon mb-4 text-center">
-                            <i class="fas fa-times-circle text-danger"></i>
-                        </div>
-                        <h2 class="mb-2 text-center">Currently Not Eligible</h2>
-                        <p class="text-center mb-1"><strong>ML Assessment Result:</strong> <span class="badge bg-danger">NOT ELIGIBLE</span></p>
-                        <p class="text-center mb-4 text-muted">Confidence Score: <strong>{{ '%.1f%%' | format(result.confidence * 100) }}</strong></p>
-                        <div class="mb-4 confidence-bar">
-                            <div class="progress">
-                                <div class="progress-bar bg-danger" role="progressbar" style="width: {{ result.confidence * 100 }}%" aria-valuenow="{{ result.confidence * 100 }}" aria-valuemin="0" aria-valuemax="100"></div>
-                            </div>
-                        </div>
-                        <p class="text-muted mb-5 text-center">Based on the information provided and ML model analysis, you may not meet the current eligibility criteria.</p>
+                    <div class="result-icon mb-4 text-center">
+                        <i class="fas fa-times-circle text-danger"></i>
+                    </div>
+                    <h2 class="mb-2 text-center">Currently Not Eligible</h2>
+                    <p class="text-muted mb-5 text-center">Based on the information provided in your application, you do not currently meet the eligibility criteria for the Solo Parent benefits under RA 11861. If your circumstances change (such as changes in income, employment, or number of dependents), you are welcome to submit a new assessment.</p>
                     {% endif %}
 
                     <!-- Applicant Summary -->
@@ -54,175 +102,152 @@
                                 <div class="col-md-6">
                                     <p class="mb-2"><strong>Name:</strong> {{ result.applicant_info.name }}</p>
                                     <p class="mb-2"><strong>Age:</strong> {{ result.applicant_info.age }} years old</p>
-                                    <p class="mb-2"><strong>Civil Status:</strong> {{ result.applicant_info.civil_status }}</p>
-                                    <p class="mb-0"><strong>Solo Parent Status:</strong> {{ result.applicant_info.solo_parent_status }}</p>
+                                    <p class="mb-2"><strong>Civil Status:</strong> {{ result.applicant_info.civil_status
+                                        }}</p>
+                                    <p class="mb-0"><strong>Solo Parent Status:</strong> {{
+                                        result.applicant_info.solo_parent_status }}</p>
                                 </div>
                                 <div class="col-md-6">
                                     <p class="mb-2"><strong>Address:</strong> {{ result.applicant_info.address }}</p>
                                     <p class="mb-2"><strong>Contact:</strong> {{ result.applicant_info.contact }}</p>
-                                    <p class="mb-2"><strong>Occupation:</strong> {{ result.applicant_info.occupation }}</p>
-                                    <p class="mb-0"><strong>Monthly Income:</strong> PHP {{ '{:,.0f}'.format(result.applicant_info.monthly_income) }}</p>
+                                    <p class="mb-2"><strong>Occupation:</strong> {{ result.applicant_info.occupation }}
+                                    </p>
+                                    <p class="mb-0"><strong>Monthly Income:</strong> PHP {{
+                                        '{:,.0f}'.format(result.applicant_info.monthly_income) }}</p>
                                 </div>
                             </div>
                         </div>
                     </div>
 
-                    <!-- Model Assessment Information -->
-                    <div class="card mb-4 border-info">
-                        <div class="card-header bg-info text-white">
-                            <h6 class="mb-0"><i class="fas fa-robot"></i> Machine Learning Assessment</h6>
-                        </div>
-                        <div class="card-body small">
-                            <div class="row">
-                                <div class="col-md-6">
-                                    <p class="mb-2"><strong>Model Type:</strong> {{ result.ml_metadata.model_type }}</p>
-                                    <p class="mb-2"><strong>Model Version:</strong> {{ result.ml_metadata.model_version }}</p>
-                                    <p class="mb-0"><strong>Model Status:</strong> <span class="badge bg-success">Active</span></p>
-                                </div>
-                                <div class="col-md-6">
-                                    <p class="mb-2"><strong>Eligibility Probability:</strong> {{ '%.1f%%' | format(result.ml_metadata.prob_eligible * 100) }}</p>
-                                    <p class="mb-2"><strong>Not Eligible Probability:</strong> {{ '%.1f%%' | format(result.ml_metadata.prob_not_eligible * 100) }}</p>
-                                    <p class="mb-0"><strong>Assessment Confidence:</strong> {{ '%.1f%%' | format(result.confidence * 100) }}</p>
-                                </div>
-                            </div>
-                            <hr>
-                            <p class="text-muted mb-0"><i class="fas fa-info-circle"></i> This assessment is based on a machine learning model trained on historical data. Final determination requires MSWDO/DSWD personnel verification.</p>
-                        </div>
-                    </div>
+
 
                     <!-- Family Members -->
                     {% if result.family_members %}
-                        <div class="card mb-4">
-                            <div class="card-body">
-                                <h6 class="mb-3">Family Composition</h6>
-                                <div class="table-responsive">
-                                    <table class="table table-sm mb-0">
-                                        <thead class="table-light">
-                                            <tr>
-                                                <th>Name</th>
-                                                <th>Relationship</th>
-                                                <th>Age</th>
-                                                <th>Civil Status</th>
-                                                <th>Education</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {% for member in result.family_members %}
-                                                <tr>
-                                                    <td>{{ member.name }}</td>
-                                                    <td>{{ member.relationship }}</td>
-                                                    <td>{{ member.age }}</td>
-                                                    <td>{{ member.civil_status }}</td>
-                                                    <td>{{ member.education }}</td>
-                                                </tr>
-                                            {% endfor %}
-                                        </tbody>
-                                    </table>
-                                </div>
+                    <div class="card mb-4">
+                        <div class="card-body">
+                            <h6 class="mb-3">Family Composition</h6>
+                            <div class="table-responsive">
+                                <table class="table table-sm mb-0">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th>Name</th>
+                                            <th>Relationship</th>
+                                            <th>Age</th>
+                                            <th>Civil Status</th>
+                                            <th>Education</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for member in result.family_members %}
+                                        <tr>
+                                            <td>{{ member.name }}</td>
+                                            <td>{{ member.relationship }}</td>
+                                            <td>{{ member.age }}</td>
+                                            <td>{{ member.civil_status }}</td>
+                                            <td>{{ member.education }}</td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
                             </div>
                         </div>
+                    </div>
                     {% endif %}
 
-                    <!-- Qualified Benefits -->
+                    <!-- Next Steps -->
                     {% if result.eligible %}
-                        <div class="card mb-4">
-                            <div class="card-header bg-primary text-white">
-                                <h6 class="mb-0"><i class="fas fa-gift"></i> Qualified Benefits</h6>
-                            </div>
-                            <div class="card-body">
-                                <div class="row g-3">
-                                    {% for benefit in result.benefits %}
-                                        <div class="col-md-6">
-                                            <div class="benefit-card">
-                                                <div class="benefit-title">{{ benefit.name }}</div>
-                                                <div class="benefit-desc">{{ benefit.description }}</div>
-                                            </div>
-                                        </div>
-                                    {% endfor %}
-                                </div>
-                            </div>
-                        </div>
 
-                        <!-- Next Steps -->
-                        <div class="card mb-4 border-success">
-                            <div class="card-header bg-success text-white">
-                                <h6 class="mb-0"><i class="fas fa-tasks"></i> Next Steps to Claim Benefits</h6>
-                            </div>
-                            <div class="card-body">
-                                <ol class="mb-0">
-                                    <li class="mb-2">
-                                        <strong>Prepare Required Documents:</strong>
-                                        <ul class="small mb-2">
-                                            <li>Barangay Certificate</li>
-                                            <li>Employment Certificate (if employed)</li>
-                                            <li>Affidavit of being a Solo Parent</li>
-                                            <li>Birth Certificate of all dependent children</li>
-                                            <li>Death Certificate (if widowed)</li>
-                                            <li>Court Documents (if separated/annulled)</li>
-                                        </ul>
-                                    </li>
-                                    <li class="mb-2">
-                                        <strong>Visit Your Local MSWDO/DSWD Office:</strong>
-                                        Bring all documents and this assessment result
-                                    </li>
-                                    <li class="mb-2">
-                                        <strong>File Your Official Application:</strong>
-                                        MSWDO/DSWD staff will guide you through the process
-                                    </li>
-                                    <li class="mb-2">
-                                        <strong>Wait for Processing:</strong>
-                                        Typically 30-45 days for verification and approval
-                                    </li>
-                                    <li class="mb-0">
-                                        <strong>Claim Your Solo Parent ID:</strong>
-                                        Once approved, you will receive your Solo Parent ID card
-                                    </li>
-                                </ol>
-                            </div>
+                    <!-- Next Steps -->
+                    <div class="card mb-4 border-success">
+                        <div class="card-header bg-success text-white">
+                            <h6 class="mb-0"><i class="fas fa-tasks"></i> Next Steps to Claim Benefits</h6>
                         </div>
+                        <div class="card-body">
+                            <ol class="mb-0">
+                                <li class="mb-2">
+                                    <strong>Prepare Required Documents:</strong>
+                                    <ul class="small mb-2">
+                                        <li>Barangay Certificate</li>
+                                        <li>Employment Certificate (if employed)</li>
+                                        <li>Affidavit of being a Solo Parent</li>
+                                        <li>Birth Certificate of all dependent children</li>
+                                        <li>Death Certificate (if widowed)</li>
+                                        <li>Court Documents (if separated/annulled)</li>
+                                    </ul>
+                                </li>
+                                <li class="mb-2">
+                                    <strong>Visit Your Local MSWDO/DSWD Office:</strong>
+                                    Bring all documents and this assessment result
+                                </li>
+                                <li class="mb-2">
+                                    <strong>File Your Official Application:</strong>
+                                    MSWDO/DSWD staff will guide you through the process
+                                </li>
+                                <li class="mb-2">
+                                    <strong>Wait for Processing:</strong>
+                                    Typically 30-45 days for verification and approval
+                                </li>
+                                <li class="mb-0">
+                                    <strong>Claim Your Solo Parent ID:</strong>
+                                    Once approved, you will receive your Solo Parent ID card
+                                </li>
+                            </ol>
+                        </div>
+                    </div>
 
                     {% elif result.needs_verification %}
-                        <!-- Required Documents -->
-                        <div class="card mb-4 border-warning">
-                            <div class="card-header bg-warning text-dark">
-                                <h6 class="mb-0"><i class="fas fa-file-upload"></i> Required for Verification</h6>
-                            </div>
-                            <div class="card-body">
-                                <p class="small mb-2">Please prepare and submit the following documents for verification:</p>
-                                <ul class="small mb-0">
-                                    <li>Updated Income Certificate from employer or barangay</li>
-                                    <li>Proof of Solo Parent Status (death certificate, court orders, affidavit)</li>
-                                    <li>Birth Certificates of all dependent children</li>
-                                    <li>Tax Identification Number (TIN) if applicable</li>
-                                    <li>Proof of residence (utility bill or barangay certification)</li>
-                                </ul>
-                            </div>
+                    <!-- Required Documents -->
+                    <div class="card mb-4 border-warning">
+                        <div class="card-header bg-warning text-dark">
+                            <h6 class="mb-0"><i class="fas fa-file-upload"></i> Required for Verification</h6>
                         </div>
+                        <div class="card-body">
+                            <p class="small mb-2">Please prepare and submit the following documents for verification:
+                            </p>
+                            <ul class="small mb-0">
+                                <li>Updated Income Certificate from employer or barangay</li>
+                                <li>Proof of Solo Parent Status (death certificate, court orders, affidavit)</li>
+                                <li>Birth Certificates of all dependent children</li>
+                                <li>Tax Identification Number (TIN) if applicable</li>
+                                <li>Proof of residence (utility bill or barangay certification)</li>
+                            </ul>
+                        </div>
+                    </div>
 
-                        <!-- Next Steps -->
-                        <div class="card mb-4">
-                            <div class="card-header bg-info text-white">
-                                <h6 class="mb-0"><i class="fas fa-arrow-right"></i> What to Do Next</h6>
-                            </div>
-                            <div class="card-body">
-                                <ol class="small mb-0">
-                                    <li>Gather the required documents listed above</li>
-                                    <li>Visit your local MSWDO/DSWD office with this assessment and all documents</li>
-                                    <li>MSWDO/DSWD staff will conduct a verification interview</li>
-                                    <li>Your application will be reviewed and you will be notified of the result</li>
-                                </ol>
-                            </div>
+                    <!-- Next Steps -->
+                    <div class="card mb-4">
+                        <div class="card-header bg-info text-white">
+                            <h6 class="mb-0"><i class="fas fa-arrow-right"></i> What to Do Next</h6>
                         </div>
+                        <div class="card-body">
+                            <ol class="small mb-0">
+                                <li>Gather the required documents listed above</li>
+                                <li>Visit your local MSWDO/DSWD office with this assessment and all documents</li>
+                                <li>MSWDO/DSWD staff will conduct a verification interview</li>
+                                <li>Your application will be reviewed and you will be notified of the result</li>
+                            </ol>
+                        </div>
+                    </div>
 
                     {% else %}
-                        <!-- Not Eligible Info -->
-                        <div class="alert alert-warning mb-4">
-                            <p class="small mb-0">
-                                <strong>Note:</strong> You may reapply if your circumstances change significantly, such as:
-                                job loss, additional dependents, medical emergency, or income changes.
-                            </p>
-                        </div>
+                    <!-- Not Eligible Info -->
+                    <div class="alert alert-warning mb-4">
+                        <p class="small mb-0">
+                            <strong>Note:</strong> You may reapply if your circumstances change significantly, such as:
+                            job loss, additional dependents, medical emergency, or income changes.
+                        </p>
+                    </div>
                     {% endif %}
+
+                    <!-- Collapsible Technical Details -->
+                    <div class="mt-4 mb-4 text-center">
+                        <button class="btn btn-outline-secondary btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#technicalDetailsCollapse" aria-expanded="false" aria-controls="technicalDetailsCollapse">
+                            <i class="fas fa-cog"></i> View Technical Details
+                        </button>
+                        <div class="collapse mt-3" id="technicalDetailsCollapse">
+                            {% include '_result_technical_details.html' %}
+                        </div>
+                    </div>
 
                     <!-- Action Buttons -->
                     <div class="d-grid gap-2 d-sm-flex justify-content-sm-center mt-5">
@@ -294,4 +319,15 @@
         transition: width 0.3s ease;
     }
 </style>
+
+<script>
+    document.addEventListener("DOMContentLoaded", function() {
+        document.querySelectorAll('.progress-bar').forEach(function(bar) {
+            var val = bar.getAttribute('aria-valuenow');
+            if (val) {
+                bar.style.width = val + '%';
+            }
+        });
+    });
+</script>
 {% endblock %}

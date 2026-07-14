@@ -16,11 +16,13 @@ import numpy as np
 app = Flask(__name__)
 app.secret_key = 'solo-parent-dss-key'
 
-# Load ML Model and Encoders at startup
+# Load ML Model and Encoders at startup using absolute paths relative to script location
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 try:
-    ml_model = joblib.load('model/solo_parent_model.pkl')
-    ml_encoders = joblib.load('model/encoders.pkl')
-    ml_feature_columns = joblib.load('model/feature_columns.pkl')
+    ml_model = joblib.load(os.path.join(BASE_DIR, 'model', 'solo_parent_model.pkl'))
+    ml_encoders = joblib.load(os.path.join(BASE_DIR, 'model', 'encoders.pkl'))
+    ml_feature_columns = joblib.load(os.path.join(BASE_DIR, 'model', 'feature_columns.pkl'))
     ml_model_loaded = True
 except Exception as e:
     print(f"Warning: Could not load ML model: {e}. Using rule-based assessment only.")
@@ -30,9 +32,25 @@ except Exception as e:
     ml_feature_columns = None
 
 try:
-    ml_model_metadata = joblib.load('model/model_metadata.pkl')
+    ml_model_metadata = joblib.load(os.path.join(BASE_DIR, 'model', 'model_metadata.pkl'))
 except Exception:
     ml_model_metadata = {}
+
+# RA 11861 income thresholds (Section 33 of the Revised IRR, Sept 29 2022)
+# https://lawphil.net/statutes/repacts/ra2022/irr_8972_2022.html
+#
+# TODO: REGIONAL_MINIMUM_WAGE_MONTHLY must be updated to match the current
+# DOLE Regional Wage Order for your area of implementation — minimum wage
+# varies by region and changes periodically. The value below is a
+# placeholder estimate (assumes ~26 working days/month) and MUST be replaced
+# with the correct regional figure before this is used for real assessments.
+REGIONAL_MINIMUM_WAGE_MONTHLY = 15860  # PLACEHOLDER — replace with current regional wage order
+
+# Section 33(b): 10% discount + VAT exemption applies to solo parents who are
+# unemployed or earning under PHP 250,000/year. This figure is set by law
+# (subject to TRAIN Law adjustment), not an assumption.
+VAT_DISCOUNT_ANNUAL_CAP = 250000
+VAT_DISCOUNT_MONTHLY_CAP = VAT_DISCOUNT_ANNUAL_CAP / 12  # ~20,833.33
 
 # RA 11861 Defined Benefits
 BENEFITS = {
@@ -42,15 +60,23 @@ BENEFITS = {
     },
     'vat_exemption': {
         'name': 'VAT Exemption & Discounts',
-        'description': 'VAT discount and VAT exemption on qualified goods and services'
+        'description': '10% discount and VAT exemption on basic necessities and infant care products'
     },
     'educational_support': {
-        'name': 'Educational Support',
-        'description': 'Assistance program for dependent children'
+        'name': 'Educational Assistance',
+        'description': 'Scholarship programs and school assistance for parent and children'
     },
-    'priority_services': {
-        'name': 'Priority Services',
-        'description': 'Priority access to government services'
+    'housing_benefits': {
+        'name': 'Housing Benefits',
+        'description': 'Priority allocation in socialized and government housing projects'
+    },
+    'health_services': {
+        'name': 'Comprehensive Health Services',
+        'description': 'Discounts on medicines, medical supplies, and healthcare programs'
+    },
+    'flexible_work': {
+        'name': 'Flexible Work Schedule',
+        'description': '7 days of paid parental leave per year and flexible work hours'
     }
 }
 
@@ -134,22 +160,51 @@ def extract_ml_features(form_data):
     except:
         age = 0
 
+    # IMPORTANT: these values must match the exact Type_of_Solo_Parent strings
+    # used in data/solo_parent_dataset2.csv, or the encoder will treat every
+    # submission as an unseen category. If the front-end form's option list
+    # changes, this map must be updated to match.
     solo_parent_type = form_data.get('solo_parent_status', '').strip().lower()
     solo_parent_map = {
-        'single': 'Unmarried',
-        'widowed': 'Widowed',
-        'separated': 'Separated',
-        'abandoned': 'Abandoned',
-        'ofw': 'OFW Spouse'
+        'single': 'Unmarried parent keeping the child',
+        'widowed': 'Death of spouse',
+        'separated': 'Legal or de facto separation',
+        'abandoned': 'Abandonment by spouse',
+        'ofw': 'Spouse is an OFW (qualifying conditions)',
+        'annulled': 'Annulment or declaration of nullity',
+        # These categories exist in RA 11861 and in the training data, but the
+        # current form (as of this fix) has no corresponding option. Add form
+        # fields for these if/when the intake form is expanded:
+        # 'detained': 'Detention of spouse'
+        # 'incapacitated': 'Physical/mental incapacity of spouse'
+        # 'pregnant': 'Pregnant woman solely responsible'
+        # 'guardian': 'Relative/guardian acting as sole parent'
     }
-    mapped_type = solo_parent_map.get(solo_parent_type, 'Unmarried')
+    # Fallback for a value the form didn't expect: use the most common
+    # legitimate category rather than silently guessing. This should be rare
+    # once the form's option list matches the keys above.
+    mapped_type = solo_parent_map.get(solo_parent_type, 'Unmarried parent keeping the child')
+
+    gender_map = {'male': 'M', 'female': 'F'}
+    mapped_gender = gender_map.get(form_data.get('sex', '').strip().lower(), 'F')
+
+    civil_status_map = {
+        'single': 'Single',
+        'married': 'Married/Separated',
+        'separated': 'Married/Separated',
+        'annulled': 'Annulled',
+        'widowed': 'Widow'
+    }
+    mapped_civil_status = civil_status_map.get(form_data.get('civil_status', '').strip().lower(), 'Single')
 
     features = {
         'Age': age,
+        'Gender': mapped_gender,
+        'Civil_Status': mapped_civil_status,
         'Educational_Attainment': form_data.get('educational_attainment', '').strip() or 'Elementary',
         'Employment_Status': infer_employment_status(form_data.get('occupation', '')),
-        'Monthly_Income': float(form_data.get('monthly_income', 0)),
-        'Number_of_Dependents': int(form_data.get('number_of_dependent_children', 0)),
+        'Monthly_Income': float(form_data.get('monthly_income', 0) or 0),
+        'Number_of_Dependents': int(form_data.get('number_of_dependent_children', 0) or 0),
         'With_Minor': has_minor_dependents(family_members),
         'With_PWD': form_data.get('with_pwd', 'No'),
         'Type_of_Solo_Parent': mapped_type
@@ -159,7 +214,7 @@ def extract_ml_features(form_data):
 
 
 def assess_eligibility_ml(form_data):
-    """ML-based eligibility assessment using pre-trained Random Forest model"""
+    """ML-based eligibility assessment using pre-trained Pipeline model"""
     if not ml_model_loaded:
         return {
             'eligible': False,
@@ -172,37 +227,55 @@ def assess_eligibility_ml(form_data):
 
         feature_df = pd.DataFrame([features])
 
-        for col in ml_encoders:
-            if col in feature_df.columns:
-                try:
-                    feature_df[col] = ml_encoders[col].transform(feature_df[col].astype(str))
-                except:
-                    feature_df[col] = 0
-
+        # Align and reorder the features to match the training feature list.
         feature_df = feature_df[ml_feature_columns]
+
+        # The model was trained on LabelEncoded categorical columns, not raw
+        # text — encoders.pkl must be applied here or every prediction fails
+        # silently (caught by the except block below) and defaults to
+        # "not eligible, 0% confidence" regardless of input.
+        categorical_cols = [
+            'Educational_Attainment', 'Employment_Status',
+            'With_Minor', 'With_PWD', 'Type_of_Solo_Parent'
+        ]
+        unseen_category_warnings = []
+        for col in categorical_cols:
+            if col not in feature_df.columns or ml_encoders is None or col not in ml_encoders:
+                continue
+            encoder = ml_encoders[col]
+            raw_value = feature_df.at[0, col]
+            if raw_value in encoder.classes_:
+                feature_df.at[0, col] = encoder.transform([raw_value])[0]
+            else:
+                # Unseen category: fall back to the encoder's first known
+                # class so prediction can still run, but flag it — this
+                # should be rare if solo_parent_map (above) is kept in sync
+                # with the training data's category strings.
+                unseen_category_warnings.append(f"{col}='{raw_value}'")
+                feature_df.at[0, col] = encoder.transform([encoder.classes_[0]])[0]
+
+        if unseen_category_warnings:
+            print(f"ML feature warning — unseen categories, using fallback encoding: {', '.join(unseen_category_warnings)}")
+
+        feature_df = feature_df.astype(float)
 
         prediction = ml_model.predict(feature_df)[0]
         probabilities = ml_model.predict_proba(feature_df)[0]
 
         classes = list(ml_model.classes_)
 
-        # Single-class model (degenerate) - return full confidence
         if len(classes) == 1:
             prob_pred = 1.0
         else:
-            # Find probability for the predicted class (robust to class ordering)
             try:
                 idx_pred = classes.index(prediction)
                 prob_pred = float(probabilities[idx_pred])
             except ValueError:
-                # Fallback: take the max probability
                 prob_pred = float(max(probabilities))
 
-        # Determine probability that corresponds to the "eligible" label (1)
         if 1 in classes:
             prob_eligible = float(probabilities[classes.index(1)])
         else:
-            # If there is no explicit class '1', infer from prediction
             prob_eligible = prob_pred if prediction == 1 else (1.0 - prob_pred)
 
         prob_not_eligible = 1.0 - prob_eligible
@@ -320,42 +393,61 @@ def assess_eligibility(data):
         'widowed',
         'abandoned',
         'separated',
-        'single'
+        'single',
+        'ofw',
+        'annulled'
     ]
 
-    # Income threshold
-    income_threshold = 30000
-    adjusted_threshold = income_threshold + (number_of_children * 5000)
-
-    # Automatic eligible criteria
-    if (
-        has_valid_status and
-        number_of_children > 0 and
-        total_family_income < adjusted_threshold and
-        age >= 18
-    ):
+    # Basic eligibility check: must have valid status, minor/dependent children, and be an adult
+    if has_valid_status and number_of_children > 0 and age >= 18:
         result['eligible'] = True
-        result['benefits'] = [
-            BENEFITS['monthly_subsidy'],
-            BENEFITS['vat_exemption'],
-            BENEFITS['educational_support'],
-            BENEFITS['priority_services']
-        ]
 
-    # Needs verification criteria
-    elif (
-        has_valid_status and
-        number_of_children > 0 and
-        total_family_income < (adjusted_threshold + 10000) and
-        age >= 18
-    ):
-        result['needs_verification'] = True
-        result['eligible'] = False
-
-    # Not eligible
+        # RA 11861 Sec. 33 defines two separate income tests, not one:
+        #   (a) minimum wage or below -> PHP 1,000/month cash subsidy
+        #   (b) unemployed or under PHP 250,000/year -> 10% discount + VAT exemption
+        # Health/education/housing/flexible-work benefits are not hard
+        # income-gated the same way, so they apply regardless of tier.
+        if total_family_income <= REGIONAL_MINIMUM_WAGE_MONTHLY:
+            # At or below minimum wage: qualifies for the full benefit set,
+            # including the cash subsidy.
+            result['benefits'] = [
+                BENEFITS['monthly_subsidy'],
+                BENEFITS['vat_exemption'],
+                BENEFITS['health_services'],
+                BENEFITS['educational_support'],
+                BENEFITS['housing_benefits'],
+                BENEFITS['flexible_work']
+            ]
+        elif total_family_income <= VAT_DISCOUNT_MONTHLY_CAP:
+            # Above minimum wage but still under the PHP 250,000/year cap:
+            # no cash subsidy (that's minimum-wage-gated), but still
+            # eligible for the VAT/discount benefit, subject to income
+            # verification since it's close to the boundary.
+            result['needs_verification'] = True
+            result['benefits'] = [
+                {
+                    'name': 'VAT Exemption & Discounts (Pending Verification)',
+                    'description': 'VAT discount and exemption, pending LGU income verification'
+                },
+                BENEFITS['health_services'],
+                BENEFITS['educational_support'],
+                BENEFITS['housing_benefits'],
+                BENEFITS['flexible_work']
+            ]
+        else:
+            # Above the PHP 250,000/year cap: no subsidy, no VAT/discount,
+            # but still entitled to the non-income-tested benefits.
+            result['benefits'] = [
+                BENEFITS['health_services'],
+                BENEFITS['educational_support'],
+                BENEFITS['housing_benefits'],
+                BENEFITS['flexible_work']
+            ]
     else:
+        # Not eligible
         result['eligible'] = False
         result['needs_verification'] = False
+        result['benefits'] = []
 
     return result
 
@@ -451,31 +543,72 @@ def submit_assessment():
         'family_members': family_members
     }
 
-    if ml_result['eligible']:
-        result['benefits'] = [
-            {'name': 'Monthly Subsidy', 'description': 'PHP 1,500 cash assistance per child, subject to official guidelines'},
-            {'name': 'VAT Exemption & Discounts', 'description': 'VAT discount and VAT exemption on qualified goods and services'},
-            {'name': 'Educational Support', 'description': 'Assistance program for dependent children'},
-            {'name': 'Priority Services', 'description': 'Priority access to government services'}
-        ]
-
-    # If ML predicts not eligible but rule-based logic qualifies the applicant,
-    # prefer the rule-based decision when ML confidence is low (avoid false negatives).
+    # Run the rule-based assessment
     try:
         rule_result = assess_eligibility(form_data)
-        ml_conf = float(ml_result.get('confidence', 0.0))
-
-        if (not ml_result.get('eligible', False)) and rule_result.get('eligible', False):
-            # If ML is not confident (threshold adjustable), override with rule-based
-            if ml_result.get('model_status') != 'success' or ml_conf < 0.60:
-                result['eligible'] = True
-                result['decision_source'] = 'Rule-Based Override'
-                result['needs_verification'] = rule_result.get('needs_verification', False)
-                result['benefits'] = rule_result.get('benefits', []) or result.get('benefits', [])
-                result['ml_metadata']['override'] = True
-                result['ml_metadata']['rule_conflict'] = True
     except Exception as e:
         print(f"Rule-based override check failed: {e}")
+        rule_result = {'eligible': False, 'needs_verification': False, 'benefits': []}
+
+    is_eligible = rule_result['eligible']
+    needs_verification = rule_result.get('needs_verification', False)
+    override = False
+    rule_conflict = False
+
+    if ml_result.get('model_status') == 'success':
+        if ml_result['eligible'] != rule_result['eligible']:
+            rule_conflict = True
+            if is_eligible:
+                needs_verification = True
+
+    decision_source = "Rule-Based Engine"
+    if rule_conflict:
+        decision_source += " (with ML Conflict Verification)"
+
+    result['eligible'] = is_eligible
+    result['decision_source'] = decision_source
+    result['needs_verification'] = needs_verification
+    result['ml_metadata']['override'] = override
+    result['ml_metadata']['rule_conflict'] = rule_conflict
+
+    # Populate and filter benefits dynamically based on income.
+    # Uses the same two RA 11861 Sec. 33 thresholds as assess_eligibility()
+    # above — kept in sync intentionally so the rule-based and displayed
+    # results never contradict each other on income tier logic.
+    if is_eligible:
+        if total_family_income <= REGIONAL_MINIMUM_WAGE_MONTHLY:
+            # Low income: all benefits, including the cash subsidy
+            result['benefits'] = [
+                {'name': 'Monthly Subsidy', 'description': 'PHP 1,500 cash assistance per child, subject to official guidelines'},
+                {'name': 'VAT Exemption & Discounts', 'description': '10% discount and VAT exemption on basic necessities and infant care products'},
+                {'name': 'Comprehensive Health Services', 'description': 'Discounts on medicines, medical supplies, and healthcare programs'},
+                {'name': 'Educational Assistance', 'description': 'Scholarship programs and school assistance for parent and children'},
+                {'name': 'Housing Benefits', 'description': 'Priority allocation in socialized and government housing projects'},
+                {'name': 'Flexible Work Schedule', 'description': '7 days of paid parental leave per year and flexible work hours'}
+            ]
+        elif total_family_income <= VAT_DISCOUNT_MONTHLY_CAP:
+            # Above minimum wage but under PHP 250,000/year: no cash
+            # subsidy, but still eligible for VAT/discount pending
+            # verification, plus the non-income-tested benefits.
+            result['needs_verification'] = True
+            result['benefits'] = [
+                {'name': 'VAT Exemption & Discounts (Pending Verification)', 'description': 'VAT discount and exemption, pending LGU income verification'},
+                {'name': 'Comprehensive Health Services', 'description': 'Discounts on medicines, medical supplies, and healthcare programs'},
+                {'name': 'Educational Assistance', 'description': 'Scholarship programs and school assistance for parent and children'},
+                {'name': 'Housing Benefits', 'description': 'Priority allocation in socialized and government housing projects'},
+                {'name': 'Flexible Work Schedule', 'description': '7 days of paid parental leave per year and flexible work hours'}
+            ]
+        else:
+            # Above PHP 250,000/year: no subsidy, no VAT/discount, but
+            # still entitled to the non-income-tested benefits.
+            result['benefits'] = [
+                {'name': 'Comprehensive Health Services', 'description': 'Discounts on medicines, medical supplies, and healthcare programs'},
+                {'name': 'Educational Assistance', 'description': 'Scholarship programs and school assistance for parent and children'},
+                {'name': 'Housing Benefits', 'description': 'Priority allocation in socialized and government housing projects'},
+                {'name': 'Flexible Work Schedule', 'description': '7 days of paid parental leave per year and flexible work hours'}
+            ]
+    else:
+        result['benefits'] = []
 
     return render_template('result.html', result=result)
 
@@ -555,6 +688,8 @@ def generate_pdf(result):
     def status_text():
         if result.get('eligible'):
             confidence = result.get('confidence', 0)
+            if result.get('needs_verification'):
+                return f"ELIGIBLE (Needs Verification for Subsidy/Discounts) ({confidence:.1%} confidence)"
             return f"ELIGIBLE ({confidence:.1%} confidence)"
         elif result.get('needs_verification'):
             return "NEEDS VERIFICATION"
@@ -972,13 +1107,21 @@ def generate_pdf(result):
 
         y -= 13
 
-        eligible_benefits = [
-            "PHP 1,500/month subsidy per dependent child, subject to official guidelines",
-            "VAT exemption on qualified goods and services",
+        # Map dynamic benefits from result to display text
+        eligible_benefits = []
+        has_subsidy = any('Subsidy' in b.get('name', '') for b in result.get('benefits', []))
+        has_vat = any('VAT' in b.get('name', '') for b in result.get('benefits', []))
+
+        if has_subsidy:
+            eligible_benefits.append("PHP 1,500/month subsidy per dependent child, subject to official guidelines")
+        if has_vat:
+            eligible_benefits.append("VAT exemption on qualified goods and services")
+
+        eligible_benefits.extend([
             "Educational support and scholarship assistance",
             "Priority access to government services",
             "Healthcare and wellness programs"
-        ]
+        ])
 
         c.setFont("Times-Roman", 8.3)
         for item in eligible_benefits:
@@ -1045,4 +1188,4 @@ def download_pdf():
 
 
 if __name__ == '__main__':
-    app.run(debug=False, host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
+    app.run(debug=True, host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))

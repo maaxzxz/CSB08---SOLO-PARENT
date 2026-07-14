@@ -1,64 +1,103 @@
 """
-Solo Parent DSS - ML Model Training (Benchmark Version)
+Solo Parent DSS - ML Model Training (Comprehensive Pipeline Version)
 
-This script trains and compares multiple candidate classifiers on the solo
-parent dataset, then saves the model that best balances recall and precision
-for eligibility screening.
+This script trains and tunes multiple candidate classifiers on the solo parent
+dataset using modular preprocessing pipelines, performs probability calibration,
+and saves the self-contained pipeline for production use.
 """
 
 import warnings
-
+import os
 import joblib
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import ExtraTreesClassifier, GradientBoostingClassifier, RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, confusion_matrix, f1_score, precision_score, recall_score
-from sklearn.model_selection import StratifiedKFold, cross_validate, train_test_split
-from sklearn.preprocessing import LabelEncoder
 from sklearn.svm import SVC
+from sklearn.metrics import accuracy_score, confusion_matrix, f1_score, precision_score, recall_score
+from sklearn.model_selection import StratifiedKFold, GridSearchCV, train_test_split
+from sklearn.preprocessing import OneHotEncoder, OrdinalEncoder, StandardScaler
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
+from sklearn.calibration import CalibratedClassifierCV
 
 warnings.filterwarnings('ignore')
 
 print("=" * 80)
-print("SOLO PARENT DSS - ML MODEL TRAINING (BENCHMARK VERSION)")
+print("SOLO PARENT DSS - ML MODEL TRAINING (PIPELINE VERSION)")
 print("=" * 80)
 
 # ============================================================================
-# STEP 1: LOAD DATA
+# STEP 1: LOAD DATA & DATA QUALITY REPORT
 # ============================================================================
-print("\n[STEP 1] Loading Dataset...")
+print("\n[STEP 1] Loading Dataset & Data Quality Check...")
 df = pd.read_csv('data/solo_parent_dataset.csv')
-print(f"  Original shape: {df.shape}")
-print(f"  Columns: {df.columns.tolist()}")
+num_rows, num_cols = df.shape
+print(f"  Dataset shape: {num_rows} rows, {num_cols} columns")
+
+# Class Balance
+class_counts = df['Eligibility'].value_counts()
+class_ratios = df['Eligibility'].value_counts(normalize=True)
+print("  Class Distribution:")
+for cls in class_counts.index:
+    print(f"    - {cls}: {class_counts[cls]} ({class_ratios[cls]:.1%})")
+
+# Missing Values
+missing_val = df.isnull().sum()
+print("  Missing Values per Column:")
+for col in missing_val.index:
+    if missing_val[col] > 0:
+        print(f"    - {col}: {missing_val[col]}")
+if missing_val.sum() == 0:
+    print("    - None (0 missing values)")
+
+# Duplicate Rows
+num_duplicates = df.duplicated().sum()
+print(f"  Duplicate Rows: {num_duplicates}")
+
+# Outliers in Monthly_Income
+q1 = df['Monthly_Income'].quantile(0.25)
+q3 = df['Monthly_Income'].quantile(0.75)
+iqr = q3 - q1
+lower_bound = q1 - 1.5 * iqr
+upper_bound = q3 + 1.5 * iqr
+outliers = df[(df['Monthly_Income'] < lower_bound) | (df['Monthly_Income'] > upper_bound)]
+print(f"  Monthly_Income Outliers (IQR Method): {len(outliers)} records out of range [{lower_bound:.1f}, {upper_bound:.1f}]")
+
+# Dataset Size Warning
+if num_rows < 1000:
+    print("  [WARNING] Dataset has less than 1000 rows. This is a primary accuracy bottleneck.")
+    print("            Model capacity and complexity must be regulated to avoid overfitting.")
+else:
+    print("  [OK] Dataset size is sufficient (>1000 rows).")
 
 # ============================================================================
 # STEP 2: REMOVE LEAKING COLUMNS
 # ============================================================================
-print("\n[STEP 2] Data Cleaning - Remove Leaking Columns...")
-leaking_columns = [
-    'Recommendation',
-    'Priority_Level',
-    'Full_Name',
-    'Barangay',
-    'Civil_Status',
-    'Sex'
-]
-
+print("\n[STEP 2] Removing Truly Leaking Columns...")
+# Recommendation & Priority_Level are generated as outcomes of assessment.
+# Full_Name & Barangay are identifiers.
+# Civil_Status and Sex are NOT leaks; they are predictive demographic characteristics.
+leaking_columns = ['Recommendation', 'Priority_Level', 'Full_Name', 'Barangay']
 leaking_present = [col for col in leaking_columns if col in df.columns]
 df_clean = df.drop(columns=leaking_present, errors='ignore')
 
 print(f"  Removed leaking columns: {leaking_present}")
-print(f"  Cleaned shape: {df_clean.shape}")
-print(f"  Remaining columns: {df_clean.columns.tolist()}")
+print(f"  Retained columns: {df_clean.columns.tolist()}")
 
 # ============================================================================
-# STEP 3: FEATURE ENGINEERING & PREPROCESSING
+# STEP 3: FEATURE ENGINEERING & SPLIT
 # ============================================================================
 print("\n[STEP 3] Feature Engineering...")
 
+# Map 'Gender' column to 'Gender' and format
+if 'Gender' in df_clean.columns:
+    df_clean['Gender'] = df_clean['Gender'].astype(str).str.strip().str.upper()
+
 feature_columns = [
     'Age',
+    'Gender',
+    'Civil_Status',
     'Educational_Attainment',
     'Employment_Status',
     'Monthly_Income',
@@ -68,24 +107,10 @@ feature_columns = [
     'Type_of_Solo_Parent'
 ]
 
-missing_features = [col for col in feature_columns if col not in df_clean.columns]
-if missing_features:
-    print(f"  [ERROR] Missing features: {missing_features}")
-    raise SystemExit(1)
-
 X = df_clean[feature_columns].copy()
 y = (df_clean['Eligibility'] == 'Eligible').astype(int)
 
-print(f"  Features selected: {len(feature_columns)}")
-print("  Target variable: Eligibility (Eligible=1, Not Eligible=0)")
-print("  Class distribution:")
-print(f"    - Eligible:     {(y == 1).sum()} ({y.mean():.1%})")
-print(f"    - Not Eligible: {(y == 0).sum()} ({1 - y.mean():.1%})")
-
-# ============================================================================
-# STEP 4: TRAIN/TEST SPLIT
-# ============================================================================
-print("\n[STEP 4] Train/Test Split (with Stratification)...")
+# Stratified Train/Test Split
 X_train, X_test, y_train, y_test = train_test_split(
     X,
     y,
@@ -94,301 +119,226 @@ X_train, X_test, y_train, y_test = train_test_split(
     stratify=y
 )
 
-print(f"  Training set: {len(X_train)} records ({len(X_train) / len(X):.0%})")
-print(f"    - Eligible: {y_train.sum()} ({y_train.mean():.1%})")
-print(f"    - Not Eligible: {(y_train == 0).sum()} ({(1 - y_train.mean()):.1%})")
-print(f"  Test set: {len(X_test)} records ({len(X_test) / len(X):.0%})")
-print(f"    - Eligible: {y_test.sum()} ({y_test.mean():.1%})")
-print(f"    - Not Eligible: {(y_test == 0).sum()} ({(1 - y_test.mean()):.1%})")
-
-assert abs(y_train.mean() - y.mean()) < 0.02, 'Stratification failed!'
-assert abs(y_test.mean() - y.mean()) < 0.02, 'Stratification failed!'
-print("  [OK] Stratification verified: Class distribution preserved")
+print(f"  Features selected: {feature_columns}")
+print(f"  Train set: {len(X_train)} records, Test set: {len(X_test)} records")
 
 # ============================================================================
-# STEP 5: ENCODE CATEGORICAL FEATURES
+# STEP 4: PREPROCESSING & PIPELINE DESIGN
 # ============================================================================
-print("\n[STEP 5] Encode Categorical Features (on Training Set Only)...")
+print("\n[STEP 4] Defining Modular Preprocessing Pipelines...")
 
 categorical_cols = [
+    'Gender',
+    'Civil_Status',
     'Educational_Attainment',
     'Employment_Status',
     'With_Minor',
     'With_PWD',
     'Type_of_Solo_Parent'
 ]
+numerical_cols = ['Age', 'Monthly_Income', 'Number_of_Dependents']
 
-label_encoders = {}
-X_train_encoded = X_train.copy()
-X_test_encoded = X_test.copy()
+# 1. Tree Preprocessor (uses OrdinalEncoder)
+tree_preprocessor = ColumnTransformer(
+    transformers=[
+        ('cat', OrdinalEncoder(handle_unknown='use_encoded_value', unknown_value=-1), categorical_cols),
+        ('num', 'passthrough', numerical_cols)
+    ]
+)
 
-for col in categorical_cols:
-    encoder = LabelEncoder()
-    X_train_encoded[col] = encoder.fit_transform(X_train_encoded[col].astype(str))
-    X_test_encoded[col] = X_test_encoded[col].apply(
-        lambda value: encoder.transform([value])[0] if value in encoder.classes_ else encoder.transform([encoder.classes_[0]])[0]
-    )
-    label_encoders[col] = encoder
-    print(f"  [OK] {col}: {list(encoder.classes_)}")
-
-assert not X_train_encoded.isna().any().any(), 'NaN values in encoded training data!'
-assert not X_test_encoded.isna().any().any(), 'NaN values in encoded test data!'
-print("  [OK] No NaN values in encoded data")
+# 2. Linear/SVM Preprocessor (uses OneHotEncoder + StandardScaler)
+linear_preprocessor = ColumnTransformer(
+    transformers=[
+        ('cat', OneHotEncoder(handle_unknown='ignore', sparse_output=False), categorical_cols),
+        ('num', StandardScaler(), numerical_cols)
+    ]
+)
 
 # ============================================================================
-# STEP 6: BENCHMARK CANDIDATE MODELS
+# STEP 5: HYPERPARAMETER TUNING & BENCHMARK
 # ============================================================================
-print("\n[STEP 6] Benchmarking Candidate Models...")
+print("\n[STEP 5] Grid Search Hyperparameter Tuning & Candidate Comparison...")
 
-candidate_models = {
-    'RandomForestClassifier': RandomForestClassifier(
-        n_estimators=50,
-        max_depth=5,
-        random_state=42,
-        min_samples_split=2,
-        min_samples_leaf=1
+candidate_configs = {
+    'RandomForestClassifier': (
+        Pipeline([
+            ('preprocessor', tree_preprocessor),
+            ('classifier', RandomForestClassifier(random_state=42))
+        ]),
+        {
+            'classifier__n_estimators': [50, 100, 200],
+            'classifier__max_depth': [None, 5, 10],
+            'classifier__min_samples_split': [2, 5]
+        }
     ),
-    'GradientBoostingClassifier': GradientBoostingClassifier(random_state=42),
-    'ExtraTreesClassifier': ExtraTreesClassifier(
-        n_estimators=200,
-        random_state=42,
-        class_weight='balanced'
+    'GradientBoostingClassifier': (
+        Pipeline([
+            ('preprocessor', tree_preprocessor),
+            ('classifier', GradientBoostingClassifier(random_state=42))
+        ]),
+        {
+            'classifier__n_estimators': [50, 100],
+            'classifier__learning_rate': [0.05, 0.1, 0.2],
+            'classifier__max_depth': [3, 5]
+        }
     ),
-    'SVC': SVC(
-        probability=True,
-        class_weight='balanced',
-        random_state=42
+    'ExtraTreesClassifier': (
+        Pipeline([
+            ('preprocessor', tree_preprocessor),
+            ('classifier', ExtraTreesClassifier(random_state=42, class_weight='balanced'))
+        ]),
+        {
+            'classifier__n_estimators': [50, 100, 200],
+            'classifier__max_depth': [None, 5, 10]
+        }
     ),
-    'LogisticRegression': LogisticRegression(
-        max_iter=2000,
-        class_weight='balanced',
-        random_state=42
+    'SVC': (
+        Pipeline([
+            ('preprocessor', linear_preprocessor),
+            ('classifier', SVC(probability=True, class_weight='balanced', random_state=42))
+        ]),
+        {
+            'classifier__C': [0.1, 1, 10],
+            'classifier__kernel': ['rbf', 'linear']
+        }
+    ),
+    'LogisticRegression': (
+        Pipeline([
+            ('preprocessor', linear_preprocessor),
+            ('classifier', LogisticRegression(max_iter=2000, class_weight='balanced', random_state=42))
+        ]),
+        {
+            'classifier__C': [0.1, 1, 10]
+        }
     )
 }
 
+skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
 benchmark_results = []
 
-for model_name, model in candidate_models.items():
-    print(f"  [RUN] {model_name}")
-    model.fit(X_train_encoded, y_train)
-    y_pred = model.predict(X_test_encoded)
-
+for name, (pipeline, param_grid) in candidate_configs.items():
+    print(f"  [TUNE & EVALUATE] {name}...")
+    
+    # We optimize F1-score during grid search to keep precision/recall balanced
+    grid_search = GridSearchCV(
+        pipeline,
+        param_grid=param_grid,
+        cv=skf,
+        scoring='f1',
+        n_jobs=-1
+    )
+    grid_search.fit(X_train, y_train)
+    
+    # Evaluate best estimator on test set
+    best_estimator = grid_search.best_estimator_
+    y_pred = best_estimator.predict(X_test)
+    
     accuracy = accuracy_score(y_test, y_pred)
     precision = precision_score(y_test, y_pred, zero_division=0)
     recall = recall_score(y_test, y_pred, zero_division=0)
     f1 = f1_score(y_test, y_pred, zero_division=0)
     cm = confusion_matrix(y_test, y_pred)
-
+    
     benchmark_results.append({
-        'model_name': model_name,
+        'model_name': name,
+        'best_params': grid_search.best_params_,
         'accuracy': float(accuracy),
         'precision': float(precision),
         'recall': float(recall),
         'f1': float(f1),
         'confusion_matrix': cm.tolist(),
-        'estimator': model
+        'pipeline': best_estimator
     })
+    
+    print(f"    - Best Params: {grid_search.best_params_}")
+    print(f"    - Accuracy:  {accuracy:.1%}")
+    print(f"    - Precision: {precision:.1%}")
+    print(f"    - Recall:    {recall:.1%}")
+    print(f"    - F1-Score:  {f1:.1%}")
 
-    print(f"    Accuracy:  {accuracy:.1%}")
-    print(f"    Precision: {precision:.1%}")
-    print(f"    Recall:    {recall:.1%}")
-    print(f"    F1-Score:  {f1:.1%}")
-
-benchmark_results = sorted(
+# Rank based on selection criteria: recall -> f1 -> precision -> accuracy
+ranked_results = sorted(
     benchmark_results,
     key=lambda item: (item['recall'], item['f1'], item['precision'], item['accuracy']),
     reverse=True
 )
 
-best_result = benchmark_results[0]
-model = best_result['estimator']
-selected_model_name = best_result['model_name']
+best_config = ranked_results[0]
+best_pipeline = best_config['pipeline']
+selected_model_name = best_config['model_name']
 
-print(f"\n  [SELECTED] {selected_model_name} based on recall -> F1 -> precision -> accuracy")
-
-# ============================================================================
-# STEP 7: EVALUATE SELECTED MODEL ON TEST SET
-# ============================================================================
-print("\n[STEP 7] Evaluating Selected Model on Test Set...")
-y_pred = model.predict(X_test_encoded)
-
-accuracy = accuracy_score(y_test, y_pred)
-precision = precision_score(y_test, y_pred, zero_division=0)
-recall = recall_score(y_test, y_pred, zero_division=0)
-f1 = f1_score(y_test, y_pred, zero_division=0)
-cm = confusion_matrix(y_test, y_pred)
-
-print(f"\n  Test Set Metrics ({selected_model_name}):")
-print(f"  - Accuracy:  {accuracy:.1%} ({int(accuracy * len(y_test))}/{len(y_test)} correct)")
-print(f"  - Precision: {precision:.1%}")
-print(f"  - Recall:    {recall:.1%}")
-print(f"  - F1-Score:  {f1:.1%}")
-
-print("\n  Confusion Matrix (Test Set):")
-print("                  Predicted Eligible | Predicted Not Eligible")
-print(f"  Actually Eligible     {cm[1, 1]:3d}      |      {cm[1, 0]:3d}")
-print(f"  Actually Not Eligible  {cm[0, 1]:3d}      |      {cm[0, 0]:3d}")
+print(f"\n  [SELECTED] {selected_model_name} as the production model candidate.")
 
 # ============================================================================
-# STEP 8: CROSS-VALIDATION ON TRAINING SET ONLY
+# STEP 6: PROBABILITY CALIBRATION
 # ============================================================================
-print("\n[STEP 8] Cross-Validation (on Training Set Only)...")
-skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-cv_results = cross_validate(
-    model,
-    X_train_encoded,
-    y_train,
-    cv=skf,
-    scoring=['accuracy', 'precision', 'recall', 'f1']
+print("\n[STEP 6] Calibrating Probabilities for Selected Model...")
+# Calibrate the selected best pipeline on training data
+calibrated_model = CalibratedClassifierCV(
+    estimator=best_pipeline,
+    method='sigmoid',
+    cv=5
 )
+calibrated_model.fit(X_train, y_train)
 
-print("  5-Fold Cross-Validation Results:")
-print(f"  - Accuracy:  {cv_results['test_accuracy'].mean():.1%} (+/- {cv_results['test_accuracy'].std():.1%})")
-print(f"  - Precision: {cv_results['test_precision'].mean():.1%} (+/- {cv_results['test_precision'].std():.1%})")
-print(f"  - Recall:    {cv_results['test_recall'].mean():.1%} (+/- {cv_results['test_recall'].std():.1%})")
-print(f"  - F1-Score:  {cv_results['test_f1'].mean():.1%} (+/- {cv_results['test_f1'].std():.1%})")
+# Evaluate calibrated model on test set
+y_cal_pred = calibrated_model.predict(X_test)
+accuracy = accuracy_score(y_test, y_cal_pred)
+precision = precision_score(y_test, y_cal_pred, zero_division=0)
+recall = recall_score(y_test, y_cal_pred, zero_division=0)
+f1 = f1_score(y_test, y_cal_pred, zero_division=0)
+cm = confusion_matrix(y_test, y_cal_pred)
 
-# ============================================================================
-# STEP 9: FEATURE IMPORTANCE / MODEL EXPLANATION
-# ============================================================================
-print("\n[STEP 9] Feature Importance (what drives decisions)...")
-if hasattr(model, 'feature_importances_'):
-    feature_importance = pd.DataFrame({
-        'Feature': feature_columns,
-        'Importance': model.feature_importances_
-    }).sort_values('Importance', ascending=False)
-    print(feature_importance.to_string(index=False))
-elif hasattr(model, 'coef_'):
-    feature_importance = pd.DataFrame({
-        'Feature': feature_columns,
-        'Importance': np.abs(model.coef_[0])
-    }).sort_values('Importance', ascending=False)
-    print(feature_importance.to_string(index=False))
-else:
-    feature_importance = pd.DataFrame({
-        'Feature': feature_columns,
-        'Importance': np.nan
-    })
-    print("  Feature importance is not available for this model type.")
+print(f"  Calibrated {selected_model_name} Test Metrics:")
+print(f"    - Accuracy:  {accuracy:.1%}")
+print(f"    - Precision: {precision:.1%}")
+print(f"    - Recall:    {recall:.1%}")
+print(f"    - F1-Score:  {f1:.1%}")
 
 # ============================================================================
-# STEP 10: SAVE MODEL & METADATA
+# STEP 7: SAVE MODEL & METADATA
 # ============================================================================
-print("\n[STEP 10] Saving Model Artifacts...")
-joblib.dump(model, 'model/solo_parent_model.pkl')
-joblib.dump(label_encoders, 'model/encoders.pkl')
+print("\n[STEP 7] Saving Model Artifacts...")
+os.makedirs('model', exist_ok=True)
+joblib.dump(calibrated_model, 'model/solo_parent_model.pkl')
+joblib.dump({}, 'model/encoders.pkl')  # Saved empty dict for app.py startup backward compatibility
 joblib.dump(feature_columns, 'model/feature_columns.pkl')
 
-benchmark_summary = [
-    {
-        'model_name': item['model_name'],
-        'accuracy': item['accuracy'],
-        'precision': item['precision'],
-        'recall': item['recall'],
-        'f1': item['f1'],
-        'confusion_matrix': item['confusion_matrix']
-    }
-    for item in benchmark_results
-]
-
+# Save model metadata
 metadata = {
     'model_type': selected_model_name,
-    'model_version': '3.0_model_benchmarking',
+    'model_version': '4.0_modular_pipeline',
     'training_date': pd.Timestamp.now().isoformat(),
     'selected_algorithm': selected_model_name,
-    'selection_criteria': ['recall', 'f1', 'precision', 'accuracy'],
-    'dataset_info': {
-        'total_records': len(df),
-        'training_records': len(X_train),
-        'test_records': len(X_test),
-        'feature_count': len(feature_columns),
-        'leaking_columns_removed': leaking_present
-    },
-    'class_distribution': {
-        'overall_eligible_ratio': float(y.mean()),
-        'train_eligible_ratio': float(y_train.mean()),
-        'test_eligible_ratio': float(y_test.mean()),
-        'total_eligible': int((y == 1).sum()),
-        'total_not_eligible': int((y == 0).sum())
-    },
-    'test_metrics': {
-        'accuracy': float(accuracy),
-        'precision': float(precision),
-        'recall': float(recall),
-        'f1_score': float(f1),
-        'confusion_matrix': cm.tolist()
-    },
-    'cross_validation_metrics': {
-        'accuracy_mean': float(cv_results['test_accuracy'].mean()),
-        'accuracy_std': float(cv_results['test_accuracy'].std()),
-        'precision_mean': float(cv_results['test_precision'].mean()),
-        'precision_std': float(cv_results['test_precision'].std()),
-        'recall_mean': float(cv_results['test_recall'].mean()),
-        'recall_std': float(cv_results['test_recall'].std()),
-        'f1_mean': float(cv_results['test_f1'].mean()),
-        'f1_std': float(cv_results['test_f1'].std())
-    },
-    'benchmark_results': benchmark_summary,
     'feature_columns': feature_columns,
     'categorical_columns': categorical_cols,
-    'feature_importance': (
-        feature_importance.set_index('Feature')['Importance'].dropna().to_dict()
-        if 'Importance' in feature_importance.columns
-        else {}
-    ),
-    'preprocessing': {
-        'encoder_type': 'LabelEncoder',
-        'encoder_fit_data': 'training_set_only',
-        'stratification_applied': True,
-        'random_state': 42
+    'numerical_columns': numerical_cols,
+    'test_metrics': {
+        'accuracy': accuracy,
+        'precision': precision,
+        'recall': recall,
+        'f1_score': f1,
+        'confusion_matrix': cm.tolist()
     },
-    'quality_assurance': {
-        'train_test_leakage_check': 'PASS - Encoders fit on training set only',
-        'stratification_check': 'PASS - Class distribution preserved',
-        'no_leaking_columns_check': 'PASS - Recommendation, Priority_Level, Full_Name removed'
-    }
+    'benchmark_results': [
+        {
+            'model_name': item['model_name'],
+            'best_params': item['best_params'],
+            'accuracy': item['accuracy'],
+            'precision': item['precision'],
+            'recall': item['recall'],
+            'f1': item['f1'],
+            'confusion_matrix': item['confusion_matrix']
+        }
+        for item in ranked_results
+    ]
 }
-
 joblib.dump(metadata, 'model/model_metadata.pkl')
 
-print("  [OK] Model saved to: model/solo_parent_model.pkl")
-print("  [OK] Encoders saved to: model/encoders.pkl")
-print("  [OK] Features saved to: model/feature_columns.pkl")
+print("  [OK] Calibrated Pipeline saved to: model/solo_parent_model.pkl")
+print("  [OK] Dummy Encoders saved to: model/encoders.pkl")
+print("  [OK] Features list saved to: model/feature_columns.pkl")
 print("  [OK] Metadata saved to: model/model_metadata.pkl")
-
-# ============================================================================
-# SUMMARY & VERIFICATION
-# ============================================================================
 print("\n" + "=" * 80)
-print("TRAINING COMPLETE - MODEL BENCHMARKING VERSION")
+print("TRAINING & TUNING COMPLETED SUCCESSFULLY")
 print("=" * 80)
-
-print(f"""
-MODEL SELECTION:
-  Selected Model:      {selected_model_name}
-  Test Accuracy:       {accuracy:.1%} (on {len(y_test)} held-out examples)
-  Test Precision:      {precision:.1%}
-  Test Recall:         {recall:.1%}
-  Test F1-Score:       {f1:.1%}
-
-  Cross-Validation:    {cv_results['test_accuracy'].mean():.1%} ± {cv_results['test_accuracy'].std():.1%}
-                       (consistent across 5 folds)
-
-TOP BENCHMARK RESULTS:
-  1. {benchmark_results[0]['model_name']} - Recall {benchmark_results[0]['recall']:.1%}, F1 {benchmark_results[0]['f1']:.1%}
-  2. {benchmark_results[1]['model_name']} - Recall {benchmark_results[1]['recall']:.1%}, F1 {benchmark_results[1]['f1']:.1%}
-  3. {benchmark_results[2]['model_name']} - Recall {benchmark_results[2]['recall']:.1%}, F1 {benchmark_results[2]['f1']:.1%}
-
-DATA QUALITY CHECKS:
-  [OK] No leaking columns (Recommendation, Priority_Level, Full_Name removed)
-  [OK] Train/test split before encoding (no data leakage)
-  [OK] Stratification applied (class balance preserved)
-  [OK] Encoders fit on training set only
-  [OK] No NaN values after preprocessing
-  [OK] Benchmarked multiple algorithms before selecting the production model
-
-FEATURE IMPORTANCE (Top 3):
-  1. {feature_importance.iloc[0]['Feature']}: {feature_importance.iloc[0]['Importance']:.1%}
-  2. {feature_importance.iloc[1]['Feature']}: {feature_importance.iloc[1]['Importance']:.1%}
-  3. {feature_importance.iloc[2]['Feature']}: {feature_importance.iloc[2]['Importance']:.1%}
-""")
