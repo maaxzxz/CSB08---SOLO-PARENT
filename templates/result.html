@@ -106,6 +106,9 @@
                                         }}</p>
                                     <p class="mb-0"><strong>Solo Parent Status:</strong> {{
                                         result.applicant_info.solo_parent_status }}</p>
+                                    {% if result.applicant_info.status_specific_question and result.applicant_info.status_specific_answer %}
+                                    <p class="mt-2 mb-0"><strong>{{ result.applicant_info.status_specific_question }}</strong> {{ result.applicant_info.status_specific_answer }}</p>
+                                    {% endif %}
                                 </div>
                                 <div class="col-md-6">
                                     <p class="mb-2"><strong>Address:</strong> {{ result.applicant_info.address }}</p>
@@ -167,12 +170,9 @@
                                 <li class="mb-2">
                                     <strong>Prepare Required Documents:</strong>
                                     <ul class="small mb-2">
-                                        <li>Barangay Certificate</li>
-                                        <li>Employment Certificate (if employed)</li>
-                                        <li>Affidavit of being a Solo Parent</li>
-                                        <li>Birth Certificate of all dependent children</li>
-                                        <li>Death Certificate (if widowed)</li>
-                                        <li>Court Documents (if separated/annulled)</li>
+                                        {% for doc in result.required_documents %}
+                                        <li>{{ doc }}</li>
+                                        {% endfor %}
                                     </ul>
                                 </li>
                                 <li class="mb-2">
@@ -205,11 +205,9 @@
                             <p class="small mb-2">Please prepare and submit the following documents for verification:
                             </p>
                             <ul class="small mb-0">
-                                <li>Updated Income Certificate from employer or barangay</li>
-                                <li>Proof of Solo Parent Status (death certificate, court orders, affidavit)</li>
-                                <li>Birth Certificates of all dependent children</li>
-                                <li>Tax Identification Number (TIN) if applicable</li>
-                                <li>Proof of residence (utility bill or barangay certification)</li>
+                                {% for doc in result.required_documents %}
+                                <li>{{ doc }}</li>
+                                {% endfor %}
                             </ul>
                         </div>
                     </div>

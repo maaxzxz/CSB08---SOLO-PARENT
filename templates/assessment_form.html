@@ -21,15 +21,15 @@
                             <div class="row">
                                 <div class="col-md-4 mb-3">
                                     <label for="first_name" class="form-label">First Name <span class="text-danger">*</span></label>
-                                    <input type="text" class="form-control" id="first_name" name="first_name" required>
+                                    <input type="text" class="form-control capitalize-input" id="first_name" name="first_name" required>
                                 </div>
                                 <div class="col-md-4 mb-3">
                                     <label for="middle_name" class="form-label">Middle Name</label>
-                                    <input type="text" class="form-control" id="middle_name" name="middle_name">
+                                    <input type="text" class="form-control capitalize-input" id="middle_name" name="middle_name">
                                 </div>
                                 <div class="col-md-4 mb-3">
                                     <label for="surname" class="form-label">Surname <span class="text-danger">*</span></label>
-                                    <input type="text" class="form-control" id="surname" name="surname" required>
+                                    <input type="text" class="form-control capitalize-input" id="surname" name="surname" required>
                                 </div>
                             </div>
 
@@ -39,8 +39,8 @@
                                     <input type="date" class="form-control" id="birthday" name="birthday" required>
                                 </div>
                                 <div class="col-md-6 mb-3">
-                                    <label for="birthplace" class="form-label">Birth Place</label>
-                                    <input type="text" class="form-control" id="birthplace" name="birthplace">
+                                    <label for="birthplace" class="form-label">Birth Place <span class="text-danger">*</span></label>
+                                    <input type="text" class="form-control capitalize-input" id="birthplace" name="birthplace" required>
                                 </div>
                             </div>
 
@@ -78,6 +78,10 @@
                                             <label class="form-check-label" for="status_annulled">Annulled</label>
                                         </div>
                                         <div class="form-check">
+                                            <input class="form-check-input" type="radio" name="civil_status" id="status_divorced" value="divorced" required>
+                                            <label class="form-check-label" for="status_divorced">Divorced</label>
+                                        </div>
+                                        <div class="form-check">
                                             <input class="form-check-input" type="radio" name="civil_status" id="status_widowed" value="widowed" required>
                                             <label class="form-check-label" for="status_widowed">Widowed</label>
                                         </div>
@@ -85,14 +89,14 @@
                                 </div>
                                 <div class="col-md-6 mb-3">
                                     <label for="address" class="form-label">Address <span class="text-danger">*</span></label>
-                                    <input type="text" class="form-control" id="address" name="address" placeholder="Street, Barangay, Municipality" required>
+                                    <input type="text" class="form-control capitalize-input" id="address" name="address" placeholder="Street, Barangay, Municipality" required>
                                 </div>
                             </div>
 
                             <div class="row">
                                 <div class="col-md-4 mb-3">
                                     <label for="contact_no" class="form-label">Contact No. <span class="text-danger">*</span></label>
-                                    <input type="tel" class="form-control" id="contact_no" name="contact_no" placeholder="09xxxxxxxxx" required>
+                                    <input type="tel" class="form-control numeric-only" id="contact_no" name="contact_no" placeholder="09xxxxxxxxx" inputmode="numeric" pattern="[0-9]{7,15}" maxlength="15" required>
                                 </div>
                                 <div class="col-md-4 mb-3">
                                     <label for="educational_attainment" class="form-label">Educational Attainment</label>
@@ -107,18 +111,18 @@
                                 </div>
                                 <div class="col-md-4 mb-3">
                                     <label for="occupation" class="form-label">Occupation <span class="text-danger">*</span></label>
-                                    <input type="text" class="form-control" id="occupation" name="occupation" placeholder="e.g., Vendor, Employee" required>
+                                    <input type="text" class="form-control capitalize-input" id="occupation" name="occupation" placeholder="e.g., Vendor, Employee" required>
                                 </div>
                             </div>
 
                             <div class="row">
                                 <div class="col-md-6 mb-3">
                                     <label for="employer_name" class="form-label">Name of Employer/Company</label>
-                                    <input type="text" class="form-control" id="employer_name" name="employer_name">
+                                    <input type="text" class="form-control capitalize-input" id="employer_name" name="employer_name">
                                 </div>
                                 <div class="col-md-6 mb-3">
                                     <label for="monthly_income" class="form-label">Monthly Income (PHP) <span class="text-danger">*</span></label>
-                                    <input type="number" class="form-control" id="monthly_income" name="monthly_income" min="0" step="100" placeholder="e.g., 15000" required>
+                                    <input type="number" class="form-control numeric-only" id="monthly_income" name="monthly_income" min="0" step="1" placeholder="e.g., 15000" inputmode="numeric" required>
                                 </div>
                             </div>
                         </div>
@@ -153,7 +157,7 @@
                             <div class="row">
                                 <div class="col-md-6">
                                     <label for="total_family_income" class="form-label">Total Family Income (PHP) <span class="text-danger">*</span></label>
-                                    <input type="number" class="form-control" id="total_family_income" name="total_family_income" min="0" step="100" placeholder="Sum of all family income" required>
+                                    <input type="number" class="form-control numeric-only" id="total_family_income" name="total_family_income" min="0" step="1" placeholder="Sum of all family income" inputmode="numeric" required>
                                 </div>
                             </div>
                         </div>
@@ -178,35 +182,76 @@
                                         </label>
                                     </div>
                                     <div class="form-check">
-                                        <input class="form-check-input" type="radio" name="solo_parent_status" id="reason_separated" value="separated" required>
+                                        <input class="form-check-input" type="radio" name="solo_parent_status" id="reason_separated" value="separated_divorced" required>
                                         <label class="form-check-label" for="reason_separated">
-                                            Legally Separated/Divorced
+                                            Legally Separated / Divorced
                                         </label>
                                     </div>
                                     <div class="form-check">
-                                        <input class="form-check-input" type="radio" name="solo_parent_status" id="reason_single" value="single" required>
+                                        <input class="form-check-input" type="radio" name="solo_parent_status" id="reason_single" value="single_parent_unmarried" required>
                                         <label class="form-check-label" for="reason_single">
-                                            Single Parent with Dependent Child
+                                            Single Parent (Unmarried)
                                         </label>
                                     </div>
                                     <div class="form-check">
-                                        <input class="form-check-input" type="radio" name="solo_parent_status" id="reason_annulled" value="annulled" required>
+                                        <input class="form-check-input" type="radio" name="solo_parent_status" id="reason_detained" value="spouse_detained_convicted" required>
+                                        <label class="form-check-label" for="reason_detained">
+                                            Spouse Detained / Convicted
+                                        </label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="radio" name="solo_parent_status" id="reason_incapacitated" value="spouse_incapacitated_medical" required>
+                                        <label class="form-check-label" for="reason_incapacitated">
+                                            Spouse Incapacitated (Medical)
+                                        </label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="radio" name="solo_parent_status" id="reason_annulled" value="annulled_nullified_marriage" required>
                                         <label class="form-check-label" for="reason_annulled">
-                                            Annulled/Nullified Marriage
+                                            Annulled / Nullified Marriage
                                         </label>
                                     </div>
                                     <div class="form-check">
-                                        <input class="form-check-input" type="radio" name="solo_parent_status" id="reason_ofw" value="ofw" required>
+                                        <input class="form-check-input" type="radio" name="solo_parent_status" id="reason_guardian" value="guardian_adoptive_foster_parent" required>
+                                        <label class="form-check-label" for="reason_guardian">
+                                            Guardian / Adoptive / Foster Parent
+                                        </label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="radio" name="solo_parent_status" id="reason_relative" value="relative_caregiver_4th_degree" required>
+                                        <label class="form-check-label" for="reason_relative">
+                                            Relative Caregiver (Up to 4th Degree)
+                                        </label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="radio" name="solo_parent_status" id="reason_grandparent" value="solo_grandparent_caregiver" required>
+                                        <label class="form-check-label" for="reason_grandparent">
+                                            Solo Grandparent Caregiver
+                                        </label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="radio" name="solo_parent_status" id="reason_pregnant" value="pregnant_woman_unborn_child" required>
+                                        <label class="form-check-label" for="reason_pregnant">
+                                            Pregnant Woman (Unborn Child)
+                                        </label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="radio" name="solo_parent_status" id="reason_ofw" value="ofw_related_guardian" required>
                                         <label class="form-check-label" for="reason_ofw">
-                                            Spouse of OFW (Low/Semi-Skilled category)
+                                            OFW-Related Guardian
                                         </label>
                                     </div>
                                 </div>
                             </div>
 
+                            <div class="mb-3 d-none" id="categoryFollowUpContainer">
+                                <label for="category_duration_answer" class="form-label" id="categoryFollowUpLabel"></label>
+                                <input type="text" class="form-control numeric-only" id="category_duration_answer" name="category_duration_answer" placeholder="Enter number of months" inputmode="numeric" pattern="[0-9]+">
+                            </div>
+
                             <div class="mb-3">
                                 <label for="number_of_dependent_children" class="form-label">Number of Dependent Children <span class="text-danger">*</span></label>
-                                <input type="number" class="form-control" id="number_of_dependent_children" name="number_of_dependent_children" min="1" max="20" required>
+                                <input type="number" class="form-control numeric-only" id="number_of_dependent_children" name="number_of_dependent_children" min="1" max="20" step="1" inputmode="numeric" required>
                             </div>
 
                             <div class="mb-3">
@@ -225,7 +270,7 @@
 
                             <div class="mb-3">
                                 <label for="solo_parent_reason" class="form-label">Additional Details/Circumstances</label>
-                                <textarea class="form-control" id="solo_parent_reason" name="solo_parent_reason" rows="3" placeholder="Provide additional information about your situation (optional)"></textarea>
+                                <textarea class="form-control capitalize-input" id="solo_parent_reason" name="solo_parent_reason" rows="3" placeholder="Provide additional information about your situation (optional)"></textarea>
                             </div>
                         </div>
 
@@ -302,7 +347,74 @@
         document.getElementById('addFamilyMemberBtn').addEventListener('click', function() {
             addFamilyMemberRow();
         });
+
+        bindCapitalizeHandlers(document);
+        bindNumericHandlers(document);
+
+        document.querySelectorAll('input[name="solo_parent_status"]').forEach(function(radio) {
+            radio.addEventListener('change', toggleCategoryFollowUp);
+        });
+
+        toggleCategoryFollowUp();
     });
+
+    function toTitleCase(text) {
+        return text.replace(/\b\w+/g, function(word) {
+            return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+        });
+    }
+
+    function bindCapitalizeHandlers(scope) {
+        scope.querySelectorAll('.capitalize-input').forEach(function(input) {
+            if (input.dataset.capBound === '1') {
+                return;
+            }
+            input.dataset.capBound = '1';
+            input.addEventListener('input', function() {
+                this.value = toTitleCase(this.value);
+            });
+        });
+    }
+
+    function bindNumericHandlers(scope) {
+        scope.querySelectorAll('.numeric-only').forEach(function(input) {
+            if (input.dataset.numBound === '1') {
+                return;
+            }
+            input.dataset.numBound = '1';
+            input.addEventListener('input', function() {
+                this.value = this.value.replace(/[^0-9]/g, '');
+            });
+        });
+    }
+
+    function toggleCategoryFollowUp() {
+        const followUpQuestions = {
+            'abandoned': 'How long has your spouse been absent?',
+            'separated_divorced': 'How long have you been separated from your spouse?',
+            'ofw_related_guardian': 'How many months has the OFW been continuously abroad?',
+            'relative_caregiver_4th_degree': 'How long have the parents been absent or unable to care for the child?',
+            'spouse_detained_convicted': 'How many months has your spouse been detained or serving sentence?'
+        };
+
+        const selected = document.querySelector('input[name="solo_parent_status"]:checked');
+        const selectedValue = selected ? selected.value : '';
+
+        const container = document.getElementById('categoryFollowUpContainer');
+        const label = document.getElementById('categoryFollowUpLabel');
+        const input = document.getElementById('category_duration_answer');
+
+        if (followUpQuestions[selectedValue]) {
+            label.textContent = followUpQuestions[selectedValue] + ' *';
+            input.required = true;
+            container.classList.remove('d-none');
+        } else {
+            label.textContent = '';
+            input.required = false;
+            input.value = '';
+            container.classList.add('d-none');
+        }
+    }
 
     function addFamilyMemberRow() {
         const tbody = document.getElementById('familyMembers');
@@ -310,11 +422,10 @@
 
         const row = document.createElement('tr');
         row.innerHTML = `
-            <td><input type="text" class="form-control form-control-sm" name="family_name_${rowIndex}" placeholder="Full Name" required></td>
+            <td><input type="text" class="form-control form-control-sm capitalize-input" name="family_name_${rowIndex}" placeholder="Full Name" required></td>
             <td>
                 <select class="form-select form-select-sm" name="family_relationship_${rowIndex}" required>
                     <option value="">Select</option>
-                    <option value="Self">Self</option>
                     <option value="Child">Child</option>
                     <option value="Dependent">Dependent</option>
                     <option value="Parent">Parent</option>
@@ -323,7 +434,7 @@
                 </select>
             </td>
             <td><input type="date" class="form-control form-control-sm" name="family_birthday_${rowIndex}" onchange="calculateAge(this, ${rowIndex})"></td>
-            <td><input type="number" class="form-control form-control-sm" id="age_${rowIndex}" name="family_age_${rowIndex}" min="0" placeholder="Age" readonly></td>
+            <td><input type="number" class="form-control form-control-sm numeric-only" id="age_${rowIndex}" name="family_age_${rowIndex}" min="0" step="1" placeholder="Age" readonly></td>
             <td>
                 <select class="form-select form-select-sm" name="family_civil_status_${rowIndex}">
                     <option value="">Select</option>
@@ -335,16 +446,20 @@
             <td>
                 <select class="form-select form-select-sm" name="family_educ_${rowIndex}">
                     <option value="">Select</option>
+                    <option value="Pre-school">Pre-school</option>
                     <option value="Elementary">Elementary</option>
                     <option value="High School">High School</option>
                     <option value="Vocational">Vocational</option>
                     <option value="College">College</option>
+                    <option value="N/A">N/A</option>
                 </select>
             </td>
-            <td><input type="text" class="form-control form-control-sm" name="family_occupation_${rowIndex}" placeholder="Occupation/Income"></td>
+            <td><input type="text" class="form-control form-control-sm capitalize-input" name="family_occupation_${rowIndex}" placeholder="Occupation/Income"></td>
             <td><button type="button" class="btn-remove" onclick="removeRow(this)"><i class="fas fa-trash"></i></button></td>
         `;
         tbody.appendChild(row);
+        bindCapitalizeHandlers(row);
+        bindNumericHandlers(row);
     }
 
     function calculateAge(dateInput, rowIndex) {

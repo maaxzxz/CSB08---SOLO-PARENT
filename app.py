@@ -52,6 +52,17 @@ REGIONAL_MINIMUM_WAGE_MONTHLY = 15860  # PLACEHOLDER — replace with current re
 VAT_DISCOUNT_ANNUAL_CAP = 250000
 VAT_DISCOUNT_MONTHLY_CAP = VAT_DISCOUNT_ANNUAL_CAP / 12  # ~20,833.33
 
+# Independent income-outlier safety net — separate from both the ML model
+# and the rule-based check above. Neither was trained/validated on incomes
+# far outside the training dataset's actual range (data/solo_parent_dataset.csv
+# tops out at PHP 84,072/month), so their verdicts can't be trusted as
+# "confidently decided" for applicants far beyond that, even if the model
+# and the rules happen to agree. Update TRAINING_DATA_MAX_MONTHLY_INCOME if
+# the training dataset is regenerated with a different income range.
+TRAINING_DATA_MAX_MONTHLY_INCOME = 84072
+INCOME_OUTLIER_MULTIPLE = 3
+INCOME_OUTLIER_THRESHOLD = TRAINING_DATA_MAX_MONTHLY_INCOME * INCOME_OUTLIER_MULTIPLE  # ~252,216
+
 # RA 11861 Defined Benefits
 BENEFITS = {
     'monthly_subsidy': {
@@ -79,6 +90,111 @@ BENEFITS = {
         'description': '7 days of paid parental leave per year and flexible work hours'
     }
 }
+
+SOLO_PARENT_STATUS_LABELS = {
+    'widowed': 'Widowed (Death of Spouse)',
+    'abandoned': 'Abandoned by Spouse',
+    'separated_divorced': 'Legally Separated / Divorced',
+    'single_parent_unmarried': 'Single Parent (Unmarried)',
+    'spouse_detained_convicted': 'Spouse Detained / Convicted',
+    'spouse_incapacitated_medical': 'Spouse Incapacitated (Medical)',
+    'annulled_nullified_marriage': 'Annulled / Nullified Marriage',
+    'guardian_adoptive_foster_parent': 'Guardian / Adoptive / Foster Parent',
+    'relative_caregiver_4th_degree': 'Relative Caregiver (Up to 4th Degree)',
+    'solo_grandparent_caregiver': 'Solo Grandparent Caregiver',
+    'pregnant_woman_unborn_child': 'Pregnant Woman (Unborn Child)',
+    'ofw_related_guardian': 'OFW-Related Guardian'
+}
+
+SOLO_PARENT_STATUS_DOCUMENTS = {
+    'widowed': [
+        'PSA/Local Civil Registry death certificate of spouse'
+    ],
+    'abandoned': [
+        'Barangay certification, police blotter, or affidavit showing abandonment'
+    ],
+    'separated_divorced': [
+        'Court decree/order of legal separation or divorce recognition, if available',
+        'If no court order, barangay certification or sworn affidavit of de facto separation'
+    ],
+    'single_parent_unmarried': [
+        'Affidavit of sole parental care and support',
+        'Certificate of No Marriage (CENOMAR), when required by LGU'
+    ],
+    'spouse_detained_convicted': [
+        'Certification of detention/commitment or prison record of spouse'
+    ],
+    'spouse_incapacitated_medical': [
+        'Medical certificate proving physical/mental incapacity of spouse'
+    ],
+    'annulled_nullified_marriage': [
+        'Court decision/decree of nullity or annulment (or recognized divorce decree)'
+    ],
+    'guardian_adoptive_foster_parent': [
+        'Court/legal document proving guardianship, adoption, or foster care authority'
+    ],
+    'relative_caregiver_4th_degree': [
+        'Proof of relationship within 4th civil degree and affidavit of assumption of care'
+    ],
+    'solo_grandparent_caregiver': [
+        'Birth certificates/proof of filiation and affidavit showing grandparent as sole caregiver'
+    ],
+    'pregnant_woman_unborn_child': [
+        'Medical certificate confirming pregnancy and affidavit of sole responsibility'
+    ],
+    'ofw_related_guardian': [
+        'OFW contract/certification and affidavit/certification of sole caregiving by applicant'
+    ]
+}
+
+COMMON_REQUIRED_DOCUMENTS = [
+    'Duly accomplished Solo Parent application form',
+    'Barangay certificate of residency and certification as solo parent applicant',
+    'Birth certificate/s of dependent child/children (or proof of dependency)',
+    'Valid government-issued ID of applicant',
+    'Proof of income (payslip/employment certificate/ITR or barangay indigency certificate, when applicable)'
+]
+
+
+def format_display_label(value):
+    text = str(value or '').strip()
+    if not text:
+        return ''
+    return ' '.join(part.capitalize() for part in text.split())
+
+
+def get_solo_parent_status_label(status_key):
+    key = str(status_key or '').strip().lower()
+    return SOLO_PARENT_STATUS_LABELS.get(key, format_display_label(key.replace('_', ' ')))
+
+
+def get_required_documents_for_status(status_key):
+    key = str(status_key or '').strip().lower()
+    docs = list(COMMON_REQUIRED_DOCUMENTS)
+    docs.extend(SOLO_PARENT_STATUS_DOCUMENTS.get(key, []))
+    docs.append('2 pcs. 1x1 recent ID photo (if required by LGU/MSWDO)')
+    return docs
+
+SOLO_PARENT_FOLLOW_UP_QUESTIONS = {
+    'abandoned': 'How long has your spouse been absent?',
+    'separated_divorced': 'How long have you been separated from your spouse?',
+    'ofw_related_guardian': 'How many months has the OFW been continuously abroad?',
+    'relative_caregiver_4th_degree': 'How long have the parents been absent or unable to care for the child?',
+    'spouse_detained_convicted': 'How many months has your spouse been detained or serving sentence?'
+}
+
+
+def format_civil_status(value):
+    status_map = {
+        'single': 'Single',
+        'married': 'Married',
+        'separated': 'Separated',
+        'divorced': 'Divorced',
+        'annulled': 'Annulled',
+        'widowed': 'Widowed'
+    }
+    key = str(value or '').strip().lower()
+    return status_map.get(key, format_display_label(value))
 
 
 def calculate_age(birthdate_str):
@@ -164,34 +280,50 @@ def extract_ml_features(form_data):
     # used in data/solo_parent_dataset2.csv, or the encoder will treat every
     # submission as an unseen category. If the front-end form's option list
     # changes, this map must be updated to match.
+    # These strings must match EXACTLY what's in the Type_of_Solo_Parent
+    # column of data/solo_parent_dataset.csv (verified against the current
+    # training data below) or the encoder treats the submission as an unseen
+    # category and effectively throws the feature away.
     solo_parent_type = form_data.get('solo_parent_status', '').strip().lower()
     solo_parent_map = {
-        'single': 'Unmarried parent keeping the child',
+        'single_parent_unmarried': 'Unmarried parent who keeps and rears the child',
         'widowed': 'Death of spouse',
-        'separated': 'Legal or de facto separation',
+        'separated_divorced': 'Legal or de facto separation',
         'abandoned': 'Abandonment by spouse',
-        'ofw': 'Spouse is an OFW (qualifying conditions)',
-        'annulled': 'Annulment or declaration of nullity',
+        'ofw_related_guardian': 'Spouse/family member/guardian of an OFW',
+        'annulled_nullified_marriage': 'Declaration of nullity, annulment, or divorce',
+        'spouse_detained_convicted': 'Detention of spouse (3+ months) or serving sentence',
+        'spouse_incapacitated_medical': 'Physical or mental incapacity of spouse',
+        'pregnant_woman_unborn_child': 'Pregnant woman solely responsible for unborn child',
+        'guardian_adoptive_foster_parent': 'Legal guardian, adoptive, or foster parent',
+        'relative_caregiver_4th_degree': 'Relative within 4th civil degree assuming care',
+        'solo_grandparent_caregiver': 'Relative within 4th civil degree assuming care',
         # These categories exist in RA 11861 and in the training data, but the
         # current form (as of this fix) has no corresponding option. Add form
         # fields for these if/when the intake form is expanded:
-        # 'detained': 'Detention of spouse'
-        # 'incapacitated': 'Physical/mental incapacity of spouse'
-        # 'pregnant': 'Pregnant woman solely responsible'
-        # 'guardian': 'Relative/guardian acting as sole parent'
+        # 'detained': 'Detention of spouse (3+ months) or serving sentence'
+        # 'incapacitated': 'Physical or mental incapacity of spouse'
+        # 'pregnant': 'Pregnant woman solely responsible for unborn child'
+        # 'guardian': 'Legal guardian, adoptive, or foster parent'
+        # 'relative': 'Relative within 4th civil degree assuming care'
+        # 'rape': 'Birth of child due to rape'
     }
     # Fallback for a value the form didn't expect: use the most common
     # legitimate category rather than silently guessing. This should be rare
     # once the form's option list matches the keys above.
-    mapped_type = solo_parent_map.get(solo_parent_type, 'Unmarried parent keeping the child')
+    mapped_type = solo_parent_map.get(solo_parent_type, 'Unmarried parent who keeps and rears the child')
 
     gender_map = {'male': 'M', 'female': 'F'}
     mapped_gender = gender_map.get(form_data.get('sex', '').strip().lower(), 'F')
 
+    # Civil_Status is trained as 5 distinct categories — 'Married' and
+    # 'Separated' are NOT the same category, so they must not be collapsed
+    # into one mapped value.
     civil_status_map = {
         'single': 'Single',
-        'married': 'Married/Separated',
-        'separated': 'Married/Separated',
+        'married': 'Married',
+        'separated': 'Separated',
+        'divorced': 'Annulled',
         'annulled': 'Annulled',
         'widowed': 'Widow'
     }
@@ -230,34 +362,53 @@ def assess_eligibility_ml(form_data):
         # Align and reorder the features to match the training feature list.
         feature_df = feature_df[ml_feature_columns]
 
-        # The model was trained on LabelEncoded categorical columns, not raw
-        # text — encoders.pkl must be applied here or every prediction fails
-        # silently (caught by the except block below) and defaults to
-        # "not eligible, 0% confidence" regardless of input.
-        categorical_cols = [
-            'Educational_Attainment', 'Employment_Status',
-            'With_Minor', 'With_PWD', 'Type_of_Solo_Parent'
-        ]
-        unseen_category_warnings = []
-        for col in categorical_cols:
-            if col not in feature_df.columns or ml_encoders is None or col not in ml_encoders:
-                continue
-            encoder = ml_encoders[col]
-            raw_value = feature_df.at[0, col]
-            if raw_value in encoder.classes_:
-                feature_df.at[0, col] = encoder.transform([raw_value])[0]
-            else:
-                # Unseen category: fall back to the encoder's first known
-                # class so prediction can still run, but flag it — this
-                # should be rare if solo_parent_map (above) is kept in sync
-                # with the training data's category strings.
-                unseen_category_warnings.append(f"{col}='{raw_value}'")
-                feature_df.at[0, col] = encoder.transform([encoder.classes_[0]])[0]
+        # Two model formats are supported here:
+        #
+        # 1) Self-contained sklearn Pipeline (train_model_fixed.py v4.0+):
+        #    the model's own ColumnTransformer does encoding internally and
+        #    expects RAW text/category values. encoders.pkl is an empty
+        #    dict {} in this case — nothing to do here, pass features
+        #    straight through.
+        #
+        # 2) Legacy flat estimator (v3.0 and earlier): trained on
+        #    LabelEncoded columns. encoders.pkl holds one fitted
+        #    LabelEncoder per categorical column, and every value must be
+        #    manually encoded, then the whole row cast to float, before
+        #    calling predict().
+        #
+        # Previously this function unconditionally ran the v3.0-style
+        # manual encoding + astype(float) path. With a v4.0 pipeline model
+        # (empty encoders.pkl), no columns ever matched `col in ml_encoders`,
+        # so nothing got encoded, and astype(float) then raised
+        # "could not convert string to float" on every single request —
+        # silently caught below, always returning 0% confidence / error.
+        if ml_encoders:
+            categorical_cols = [
+                'Educational_Attainment', 'Employment_Status',
+                'With_Minor', 'With_PWD', 'Type_of_Solo_Parent'
+            ]
+            unseen_category_warnings = []
+            for col in categorical_cols:
+                if col not in feature_df.columns or col not in ml_encoders:
+                    continue
+                encoder = ml_encoders[col]
+                raw_value = feature_df.at[0, col]
+                if raw_value in encoder.classes_:
+                    feature_df.at[0, col] = encoder.transform([raw_value])[0]
+                else:
+                    # Unseen category: fall back to the encoder's first known
+                    # class so prediction can still run, but flag it — this
+                    # should be rare if solo_parent_map (above) is kept in
+                    # sync with the training data's category strings.
+                    unseen_category_warnings.append(f"{col}='{raw_value}'")
+                    feature_df.at[0, col] = encoder.transform([encoder.classes_[0]])[0]
 
-        if unseen_category_warnings:
-            print(f"ML feature warning — unseen categories, using fallback encoding: {', '.join(unseen_category_warnings)}")
+            if unseen_category_warnings:
+                print(f"ML feature warning — unseen categories, using fallback encoding: {', '.join(unseen_category_warnings)}")
 
-        feature_df = feature_df.astype(float)
+            feature_df = feature_df.astype(float)
+        # else: self-contained pipeline model — leave feature_df as raw
+        # text/category values; the pipeline's own preprocessor handles it.
 
         prediction = ml_model.predict(feature_df)[0]
         probabilities = ml_model.predict_proba(feature_df)[0]
@@ -338,7 +489,8 @@ def assess_eligibility(data):
     except:
         total_family_income = 0
 
-    solo_parent_status = data.get('solo_parent_status', '')
+    solo_parent_status = data.get('solo_parent_status', '').strip().lower()
+    status_specific_answer = data.get('category_duration_answer', '').strip()
 
     try:
         number_of_children = int(data.get('number_of_dependent_children', 0))
@@ -369,7 +521,7 @@ def assess_eligibility(data):
         'contact': contact_no,
         'landline': data.get('landline', '').strip(),
 
-        'civil_status': civil_status,
+        'civil_status': format_civil_status(civil_status),
         'education': data.get('educational_attainment', '').strip(),
         'religion': data.get('religion', '').strip(),
 
@@ -381,10 +533,14 @@ def assess_eligibility(data):
         'monthly_income': monthly_income,
         'total_family_income': total_family_income,
 
-        'solo_parent_status': solo_parent_status.title(),
+        'solo_parent_status': get_solo_parent_status_label(solo_parent_status),
         'solo_parent_reason': solo_parent_reason,
+        'status_specific_question': SOLO_PARENT_FOLLOW_UP_QUESTIONS.get(solo_parent_status, ''),
+        'status_specific_answer': status_specific_answer,
         'number_of_children': number_of_children
     }
+
+    result['required_documents'] = get_required_documents_for_status(solo_parent_status)
 
     result['family_members'] = family_members
 
@@ -392,10 +548,16 @@ def assess_eligibility(data):
     has_valid_status = solo_parent_status in [
         'widowed',
         'abandoned',
-        'separated',
-        'single',
-        'ofw',
-        'annulled'
+        'separated_divorced',
+        'single_parent_unmarried',
+        'ofw_related_guardian',
+        'annulled_nullified_marriage',
+        'spouse_detained_convicted',
+        'spouse_incapacitated_medical',
+        'guardian_adoptive_foster_parent',
+        'relative_caregiver_4th_degree',
+        'solo_grandparent_caregiver',
+        'pregnant_woman_unborn_child'
     ]
 
     # Basic eligibility check: must have valid status, minor/dependent children, and be an adult
@@ -527,7 +689,7 @@ def submit_assessment():
             'address': form_data.get('address', '').strip(),
             'contact': form_data.get('contact_no', '').strip(),
             'landline': form_data.get('landline', '').strip(),
-            'civil_status': form_data.get('civil_status', ''),
+            'civil_status': format_civil_status(form_data.get('civil_status', '')),
             'education': form_data.get('educational_attainment', '').strip(),
             'religion': form_data.get('religion', '').strip(),
             'occupation': form_data.get('occupation', '').strip(),
@@ -536,11 +698,14 @@ def submit_assessment():
             'office_contact': form_data.get('office_contact', '').strip(),
             'monthly_income': monthly_income,
             'total_family_income': total_family_income,
-            'solo_parent_status': form_data.get('solo_parent_status', '').title(),
+            'solo_parent_status': get_solo_parent_status_label(form_data.get('solo_parent_status', '')),
             'solo_parent_reason': form_data.get('solo_parent_reason', '').strip(),
+            'status_specific_question': SOLO_PARENT_FOLLOW_UP_QUESTIONS.get(form_data.get('solo_parent_status', '').strip().lower(), ''),
+            'status_specific_answer': form_data.get('category_duration_answer', '').strip(),
             'number_of_children': number_of_children
         },
-        'family_members': family_members
+        'family_members': family_members,
+        'required_documents': get_required_documents_for_status(form_data.get('solo_parent_status', '').strip().lower())
     }
 
     # Run the rule-based assessment
@@ -561,15 +726,27 @@ def submit_assessment():
             if is_eligible:
                 needs_verification = True
 
+    # Independent income-outlier safety net (see INCOME_OUTLIER_THRESHOLD
+    # above). This check runs regardless of whether the ML model and the
+    # rule-based logic agree — agreement between them doesn't mean much if
+    # neither was ever validated on income values this extreme.
+    income_outlier = max(monthly_income, total_family_income) > INCOME_OUTLIER_THRESHOLD
+    if income_outlier:
+        needs_verification = True
+
     decision_source = "Rule-Based Engine"
     if rule_conflict:
         decision_source += " (with ML Conflict Verification)"
+    if income_outlier:
+        decision_source += " (Income Outside Training Range — Flagged for Review)"
 
     result['eligible'] = is_eligible
     result['decision_source'] = decision_source
     result['needs_verification'] = needs_verification
     result['ml_metadata']['override'] = override
     result['ml_metadata']['rule_conflict'] = rule_conflict
+    result['ml_metadata']['income_outlier_flagged'] = income_outlier
+    result['ml_metadata']['income_outlier_threshold'] = INCOME_OUTLIER_THRESHOLD
 
     # Populate and filter benefits dynamically based on income.
     # Uses the same two RA 11861 Sec. 33 thresholds as assess_eligibility()
@@ -645,7 +822,8 @@ def generate_pdf(result):
         c.setFont("Times-Roman", font_size)
         c.drawString(x, y, label)
         line(line_start, y - 2, line_end)
-        c.drawString(line_start + 3, y + 1, safe(value)[:60])
+        value_text = safe(value)[:60]
+        c.drawCentredString((line_start + line_end) / 2, y + 1, value_text)
 
     def checkbox(x, y, text, checked=False):
         c.rect(x, y - 2, 8, 8)
@@ -749,9 +927,12 @@ def generate_pdf(result):
     c.drawString(margin_left + 105, y, ":")
     line(margin_left + 150, y - 2, width - 150)
 
-    c.drawString(margin_left + 165, y + 1, safe(app_info.get('first_name', ''))[:16])
-    c.drawString(margin_left + 280, y + 1, safe(app_info.get('middle_name', ''))[:16])
-    c.drawString(margin_left + 405, y + 1, safe(app_info.get('surname', ''))[:16])
+    first_start, first_end = margin_left + 150, margin_left + 275
+    middle_start, middle_end = margin_left + 275, margin_left + 400
+    sur_start, sur_end = margin_left + 400, width - 150
+    c.drawCentredString((first_start + first_end) / 2, y + 1, safe(app_info.get('first_name', ''))[:16])
+    c.drawCentredString((middle_start + middle_end) / 2, y + 1, safe(app_info.get('middle_name', ''))[:16])
+    c.drawCentredString((sur_start + sur_end) / 2, y + 1, safe(app_info.get('surname', ''))[:16])
 
     c.setFont("Times-Roman", 8)
     c.drawString(margin_left + 185, y - 12, "(First Name)")
@@ -777,9 +958,11 @@ def generate_pdf(result):
     civil = safe(app_info.get('civil_status', '')).lower()
 
     checkbox(margin_left + 150, y, "Single", "single" in civil)
-    checkbox(margin_left + 215, y, "Married/Separated", "married" in civil or "separated" in civil)
-    checkbox(margin_left + 345, y, "Annulled", "annulled" in civil)
-    checkbox(margin_left + 430, y, "Widow", "widow" in civil or "widowed" in civil)
+    checkbox(margin_left + 210, y, "Married", "married" in civil)
+    checkbox(margin_left + 285, y, "Separated", "separated" in civil)
+    checkbox(margin_left + 370, y, "Divorced", "divorce" in civil or "divorced" in civil)
+    checkbox(margin_left + 455, y, "Annulled", "annulled" in civil)
+    checkbox(margin_left + 530, y, "Widow", "widow" in civil or "widowed" in civil)
 
     y -= 16
     label_value("Educ. Attainment", safe(app_info.get('education', '')), margin_left + 45, y, margin_left + 150, margin_left + 280)
@@ -897,7 +1080,8 @@ def generate_pdf(result):
                 row_bottom,
                 col_widths[col_index],
                 row_h,
-                font_size=7
+                font_size=7,
+                center=True
             )
             current_x += col_widths[col_index]
 
@@ -983,33 +1167,9 @@ def generate_pdf(result):
     c.rect(thumb_x, thumb_y, 70, 60)
     c.drawCentredString(thumb_x + 35, thumb_y - 12, "Right Thumb Mark")
 
-    # ---------- Requirements ----------
-    req_y_start = signature_y - 55
-    req_y = req_y_start
-
-    c.setFont("Times-Bold", 9)
-    c.drawString(margin_left, req_y, "REQUIREMENTS:")
-
-    requirements = [
-        "Barangay Certificate",
-        "Employment Certificate",
-        "Affidavit of being a solo parent",
-        "Birth Certificate (Minor Children/PWD)",
-        "Death Certificate (If Widow)",
-        "2 pcs. 1x1 Picture of the Applicant"
-    ]
-
-    c.setFont("Times-Roman", 8)
-    req_y -= 13
-
-    for item in requirements:
-        c.drawString(margin_left + 18, req_y, "-")
-        c.drawString(margin_left + 32, req_y, item)
-        req_y -= 11
-
     # ---------- Small system assessment note ----------
     note_x = width - 345
-    note_y = req_y_start
+    note_y = signature_y - 55
 
     c.setFont("Times-Bold", 8)
     c.drawString(note_x, note_y, "System Assessment Result:")
@@ -1021,7 +1181,7 @@ def generate_pdf(result):
     c.drawString(note_x, note_y - 13, "Final approval is still subject to MSWDO/DSWD verification.")
 
     # ---------- V. Eligibility Result, Requirements & Recommendations ----------
-    y = req_y - 35
+    y = signature_y - 95
 
     # Page Break Check for Section V
     if y < 320:
@@ -1064,15 +1224,7 @@ def generate_pdf(result):
 
     y -= 13
 
-    required_documents = [
-        "Barangay Certificate confirming solo parent status",
-        "Employment Certificate or Payslip, if employed",
-        "Affidavit of Solo Parent Status, notarized",
-        "Birth Certificate of all dependent children",
-        "Death Certificate if widowed, or Court Orders if separated/annulled",
-        "Valid ID and Proof of Residence",
-        "Tax Identification Number (TIN), if applicable"
-    ]
+    required_documents = result.get('required_documents', [])
 
     c.setFont("Times-Roman", 8.3)
     for item in required_documents:

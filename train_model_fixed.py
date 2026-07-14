@@ -273,6 +273,14 @@ print(f"\n  [SELECTED] {selected_model_name} as the production model candidate."
 # STEP 6: PROBABILITY CALIBRATION
 # ============================================================================
 print("\n[STEP 6] Calibrating Probabilities for Selected Model...")
+
+# DIAGNOSTIC: probability spread BEFORE calibration
+raw_proba = best_pipeline.predict_proba(X_test)[:, 1]
+print(f"  [DIAGNOSTIC] Raw (uncalibrated) test probabilities: min={raw_proba.min():.3f}, "
+      f"max={raw_proba.max():.3f}, mean={raw_proba.mean():.3f}, std={raw_proba.std():.3f}")
+print(f"  [DIAGNOSTIC] Fraction of raw probs within 0.40-0.60 band: "
+      f"{((raw_proba > 0.40) & (raw_proba < 0.60)).mean():.1%}")
+
 # Calibrate the selected best pipeline on training data
 calibrated_model = CalibratedClassifierCV(
     estimator=best_pipeline,
@@ -280,6 +288,13 @@ calibrated_model = CalibratedClassifierCV(
     cv=5
 )
 calibrated_model.fit(X_train, y_train)
+
+# DIAGNOSTIC: probability spread AFTER calibration
+cal_proba_diag = calibrated_model.predict_proba(X_test)[:, 1]
+print(f"  [DIAGNOSTIC] Calibrated test probabilities: min={cal_proba_diag.min():.3f}, "
+      f"max={cal_proba_diag.max():.3f}, mean={cal_proba_diag.mean():.3f}, std={cal_proba_diag.std():.3f}")
+print(f"  [DIAGNOSTIC] Fraction of calibrated probs within 0.40-0.60 band: "
+      f"{((cal_proba_diag > 0.40) & (cal_proba_diag < 0.60)).mean():.1%}")
 
 # Evaluate calibrated model on test set
 y_cal_pred = calibrated_model.predict(X_test)
@@ -342,3 +357,4 @@ print("  [OK] Metadata saved to: model/model_metadata.pkl")
 print("\n" + "=" * 80)
 print("TRAINING & TUNING COMPLETED SUCCESSFULLY")
 print("=" * 80)
+    
