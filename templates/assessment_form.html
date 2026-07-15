@@ -144,7 +144,7 @@
                             </p>
                             <div class="collapse mb-3" id="dependentInfo">
                                 <div class="alert alert-info small mb-0">
-                                    Per RA 11861, only a member whose relationship is "<strong>Dependent</strong>" counts as a dependent child &mdash; and only if they are <strong>unmarried</strong>, <strong>unemployed</strong>, and 22 years old or younger (or older only if unable to care for themselves due to disability).
+                                    Per RA 11861, a member whose relationship is "<strong>Dependent</strong>" or "<strong>Child</strong>" counts as a dependent child &mdash; if they are <strong>unmarried</strong>, <strong>unemployed</strong>, and 22 years old or younger (or older only if unable to care for themselves due to disability).
                                 </div>
                             </div>
 
@@ -692,14 +692,25 @@
             problems.push('Applicant must be at least 18 years old to apply as a solo parent (current age: ' + age + ').');
         }
 
-        // Non-pregnancy applicants need at least one dependent (relationship
-        // "Dependent") in the roster — the auto-filled count field is
-        // read-only, so native "required" validation won't catch a 0 here.
+        // Non-pregnancy applicants need at least one qualifying dependent in
+        // the roster — the auto-filled count field is read-only, so native
+        // "required" validation won't catch a 0 here. When rows exist but
+        // none qualify, say exactly WHY each one was not counted instead of
+        // a generic "add a dependent".
         const selectedReason = document.querySelector('input[name="solo_parent_status"]:checked');
         const isPregnancy = selectedReason && selectedReason.value === 'pregnant_woman_unborn_child';
         const num = parseInt(document.getElementById('number_of_dependent_children').value, 10) || 0;
         if (!isPregnancy && num < 1) {
-            problems.push('Add at least one dependent in the family composition (relationship "Dependent").');
+            const reasons = [];
+            document.querySelectorAll('#familyMembers tr').forEach(function(row) {
+                const st = dependentRowStatus(row);
+                if (!st.counted && st.reason) reasons.push(st.reason);
+            });
+            if (reasons.length) {
+                problems.push.apply(problems, reasons);
+            } else {
+                problems.push('Add at least one dependent child in the family composition (relationship "Dependent" or "Child").');
+            }
         }
 
         // Suggestion #5: PH mobile number.
@@ -934,14 +945,14 @@
 
     // Auto-derive "Number of Dependent Children" and "Age of Youngest
     // Dependent Child" (both read-only) from the family composition. Mirrors
-    // the server's derive_dependent_children(): a household member counts ONLY
-    // if their relationship is "Dependent" (a "Child" row is filiation info,
-    // never counted), they are unmarried, UNEMPLOYED (no declared income),
+    // the server's derive_dependent_children(): a "Dependent" or "Child" row
+    // counts if that member is unmarried, UNEMPLOYED (no declared income),
     // and within the dependent age cap (<= 22, or over it only if that
     // member — the dependent themselves, not the applicant — is a PWD).
     // Pregnancy category: the unborn child (age -1) is the youngest and is
     // included in the count.
     const MAX_DEPENDENT_AGE = 22;
+    const MINIMUM_EMPLOYMENT_AGE = 15;
 
     // Occupation values that mean "not employed" — mirrors the server's
     // NO_OCCUPATION_SYNONYMS + _EXTRA_NOT_EMPLOYED_OCCUPATIONS (app.py);
@@ -957,14 +968,55 @@
     // Mirrors app.py _member_is_employed(): a declared income > 0, or an
     // occupation that isn't a "no occupation" synonym, makes the member
     // employed/earning — and an employed member is NOT a dependent under
-    // RA 11861.
+    // RA 11861. Below the PH minimum working age (15), occupation text like
+    // "Grade 1" or "Pupil" can't mean employment.
     function memberRowIsEmployed(row) {
         const incEl = row.querySelector('input[name^="family_income_"]');
         if (incEl && Number(digitsOnly(incEl.value)) > 0) return true;
+        const ageEl = row.querySelector('input[name^="family_age_"]');
+        const age = ageEl ? parseInt(ageEl.value, 10) : NaN;
+        if (!isNaN(age) && age < MINIMUM_EMPLOYMENT_AGE) return false;
         const occEl = row.querySelector('input[name^="family_occupation_"]');
         const occ = occEl ? occEl.value.trim().toLowerCase().replace(/\.+$/, '') : '';
         if (!occ) return false;
         return NOT_EMPLOYED_OCCUPATIONS.indexOf(occ) === -1;
+    }
+
+    // Shared qualifier: decides whether a family row counts as a dependent
+    // child. Returns { counted: true, age } or { counted: false, reason } —
+    // reason is null for rows that aren't child-type rows at all, and a
+    // human-readable explanation otherwise (surfaced by validateApplicant
+    // when zero dependents qualify, so nobody has to guess why).
+    function dependentRowStatus(row) {
+        const relEl = row.querySelector('select[name^="family_relationship_"]');
+        const rel = relEl ? relEl.value.toLowerCase() : '';
+        if (rel !== 'dependent' && rel !== 'child') {
+            return { counted: false, reason: null };
+        }
+        const nameEl = row.querySelector('input[name^="family_name_"]');
+        const name = (nameEl && nameEl.value.trim()) || 'A family member';
+        const civilEl = row.querySelector('select[name^="family_civil_status_"]');
+        const civil = civilEl ? civilEl.value.toLowerCase() : '';
+        if (civil === 'married' || civil === 'widowed') {
+            return { counted: false, reason: name + ' is not counted as a dependent because a dependent child must be unmarried.' };
+        }
+        const ageEl = row.querySelector('input[name^="family_age_"]');
+        if (!ageEl || ageEl.value === '') {
+            return { counted: false, reason: name + ' is not counted as a dependent yet — enter their birthday so their age can be determined.' };
+        }
+        const a = parseInt(ageEl.value, 10);
+        if (isNaN(a) || a < 0) {
+            return { counted: false, reason: name + ' has an invalid age.' };
+        }
+        const pwdRowEl = row.querySelector('select[name^="family_pwd_"]');
+        const memberPwd = pwdRowEl && pwdRowEl.value === 'Yes';
+        if (a > MAX_DEPENDENT_AGE && !memberPwd) {
+            return { counted: false, reason: name + ' is over ' + MAX_DEPENDENT_AGE + ' and not a PWD, so RA 11861 does not count them as a dependent.' };
+        }
+        if (memberRowIsEmployed(row)) {
+            return { counted: false, reason: name + ' is employed / has a declared income, so they do not count as a dependent (RA 11861 requires a dependent to be unemployed).' };
+        }
+        return { counted: true, age: a };
     }
 
     function syncDependentFieldsFromRoster() {
@@ -974,21 +1026,8 @@
 
         const ages = [];
         document.querySelectorAll('#familyMembers tr').forEach(function(row) {
-            const relEl = row.querySelector('select[name^="family_relationship_"]');
-            const ageEl = row.querySelector('input[name^="family_age_"]');
-            const civilEl = row.querySelector('select[name^="family_civil_status_"]');
-            const pwdRowEl = row.querySelector('select[name^="family_pwd_"]');
-            if (!relEl || !ageEl) return;
-            if (relEl.value.toLowerCase() !== 'dependent') return;       // only "Dependent" counts
-            const civil = civilEl ? civilEl.value.toLowerCase() : '';
-            if (civil === 'married' || civil === 'widowed') return;      // must be unmarried
-            if (ageEl.value === '') return;
-            const a = parseInt(ageEl.value, 10);
-            if (isNaN(a) || a < 0) return;
-            const memberPwd = pwdRowEl && pwdRowEl.value === 'Yes';
-            if (a > MAX_DEPENDENT_AGE && !memberPwd) return;             // over 22 only if the member is a PWD
-            if (memberRowIsEmployed(row)) return;                        // must be unemployed
-            ages.push(a);
+            const st = dependentRowStatus(row);
+            if (st.counted) ages.push(st.age);
         });
 
         const selected = document.querySelector('input[name="solo_parent_status"]:checked');

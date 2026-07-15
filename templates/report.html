@@ -1,0 +1,188 @@
+{% extends "base.html" %}
+
+{% block title %}Report an Inquiry - Solo Parent DSS{% endblock %}
+
+{% block content %}
+<!-- Page Header -->
+<section style="background: linear-gradient(135deg, #002d5f 0%, #001a36 100%); color: white; padding: 3rem 0;">
+    <div class="container">
+        <a href="/" class="text-white text-decoration-none small mb-3 d-inline-block" style="opacity:0.75;">
+            <i class="fas fa-arrow-left me-1"></i> Back to Home
+        </a>
+        <h1 style="color:white; font-size:2rem; margin-bottom:0.5rem;">
+            <i class="fas fa-flag me-2" style="color:#f0a500;"></i> Report an Inquiry
+        </h1>
+        <p style="opacity:0.85; margin:0;">Submit a concern, error report, or feedback about this system.</p>
+    </div>
+</section>
+
+<section class="py-5">
+    <div class="container">
+        <div class="row">
+            <div class="col-lg-7 mx-auto">
+
+                <!-- Info Banner -->
+                <div class="alert mb-4" style="background:#e3f2fd; border-left:4px solid #1565c0; color:#0d47a1; border-radius:6px;">
+                    <i class="fas fa-info-circle me-2"></i>
+                    <strong>Anonymous Reporting:</strong> Your submission is processed without storing any personal 
+                    identifiers. This form is for feedback and demonstration purposes only.
+                </div>
+
+                <!-- Report Type Selector -->
+                <div class="card p-4 mb-4">
+                    <h5 style="color:#002d5f; font-weight:700; margin-bottom:1.2rem;">
+                        <i class="fas fa-list-ul me-2 text-danger"></i> Select Report Type
+                    </h5>
+                    <div class="row g-3" id="reportTypeGroup">
+                        <div class="col-md-6">
+                            <div class="report-type-card p-3 rounded border text-center"
+                                 onclick="selectType(this, 'system-bug')"
+                                 style="cursor:pointer; transition:all 0.2s; border-color:#dee2e6 !important;">
+                                <i class="fas fa-bug fa-2x mb-2" style="color:#8b0000;"></i>
+                                <p class="mb-0 fw-semibold small" style="color:#333;">System Bug / Error</p>
+                                <p class="mb-0 text-muted" style="font-size:0.75rem;">Something isn't working correctly</p>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="report-type-card p-3 rounded border text-center"
+                                 onclick="selectType(this, 'wrong-result')"
+                                 style="cursor:pointer; transition:all 0.2s; border-color:#dee2e6 !important;">
+                                <i class="fas fa-exclamation-triangle fa-2x mb-2" style="color:#f0a500;"></i>
+                                <p class="mb-0 fw-semibold small" style="color:#333;">Incorrect Assessment Result</p>
+                                <p class="mb-0 text-muted" style="font-size:0.75rem;">The eligibility result seems wrong</p>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="report-type-card p-3 rounded border text-center"
+                                 onclick="selectType(this, 'privacy')"
+                                 style="cursor:pointer; transition:all 0.2s; border-color:#dee2e6 !important;">
+                                <i class="fas fa-lock fa-2x mb-2" style="color:#1565c0;"></i>
+                                <p class="mb-0 fw-semibold small" style="color:#333;">Privacy Concern</p>
+                                <p class="mb-0 text-muted" style="font-size:0.75rem;">Data handling issue or concern</p>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="report-type-card p-3 rounded border text-center"
+                                 onclick="selectType(this, 'suggestion')"
+                                 style="cursor:pointer; transition:all 0.2s; border-color:#dee2e6 !important;">
+                                <i class="fas fa-lightbulb fa-2x mb-2" style="color:#2e7d32;"></i>
+                                <p class="mb-0 fw-semibold small" style="color:#333;">Suggestion / Feedback</p>
+                                <p class="mb-0 text-muted" style="font-size:0.75rem;">Ideas to improve the system</p>
+                            </div>
+                        </div>
+                    </div>
+                    <input type="hidden" id="selectedType" value="">
+                </div>
+
+                <!-- Report Form -->
+                <div class="card p-4">
+                    <h5 style="color:#002d5f; font-weight:700; margin-bottom:1.2rem;">
+                        <i class="fas fa-edit me-2 text-danger"></i> Report Details
+                    </h5>
+                    <form id="reportForm" onsubmit="submitReport(event)">
+
+                        <div class="mb-3">
+                            <label class="form-label">Your Name <span class="text-muted fw-normal">(Optional)</span></label>
+                            <input type="text" class="form-control" id="reportName"
+                                   placeholder="Leave blank to remain anonymous">
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label">Email <span class="text-muted fw-normal">(Optional — for follow-up only)</span></label>
+                            <input type="email" class="form-control" id="reportEmail"
+                                   placeholder="e.g. yourname@email.com">
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label">Subject <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="reportSubject" required
+                                   placeholder="Brief summary of your concern">
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label">Description <span class="text-danger">*</span></label>
+                            <textarea class="form-control" id="reportDescription" rows="5" required
+                                      placeholder="Please describe the issue or feedback in detail. If reporting a bug, include what steps led to the problem."></textarea>
+                        </div>
+
+                        <div class="mb-4">
+                            <label class="form-label">Urgency Level</label>
+                            <div class="d-flex gap-3 flex-wrap">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="urgency" id="urgLow" value="low" checked>
+                                    <label class="form-check-label small" for="urgLow">Low — General feedback</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="urgency" id="urgMed" value="medium">
+                                    <label class="form-check-label small" for="urgMed">Medium — Minor issue</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="urgency" id="urgHigh" value="high">
+                                    <label class="form-check-label small" for="urgHigh">High — Blocking issue</label>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="d-flex align-items-center gap-3">
+                            <button type="submit" class="btn btn-danger">
+                                <i class="fas fa-paper-plane me-2"></i> Submit Inquiry
+                            </button>
+                            <button type="reset" class="btn btn-outline-secondary">
+                                <i class="fas fa-undo me-1"></i> Clear
+                            </button>
+                        </div>
+                    </form>
+
+                    <!-- Success Message (hidden by default) -->
+                    <div id="reportSuccess" class="mt-4 p-3 rounded text-center" 
+                         style="display:none; background:#e8f5e9; border:1px solid #c8e6c9; color:#2e7d32;">
+                        <i class="fas fa-check-circle fa-2x mb-2"></i>
+                        <p class="fw-semibold mb-1">Inquiry Submitted!</p>
+                        <p class="small mb-0">Thank you. Your report has been received (demonstration mode — no data stored).</p>
+                    </div>
+                </div>
+
+                <!-- Alternative Contact -->
+                <div class="mt-4 text-center small text-muted">
+                    For urgent legal or welfare concerns, contact the 
+                    <strong>DSWD Hotline: 8888</strong> or visit your nearest MSWDO office.
+                    <br>
+                    <a href="/contact" style="color:#8b0000;">View full contact details →</a>
+                </div>
+
+            </div>
+        </div>
+    </div>
+</section>
+
+<style>
+    .report-type-card:hover {
+        border-color: #002d5f !important;
+        background: #f0f4f8;
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+    }
+    .report-type-card.selected {
+        border-color: #8b0000 !important;
+        background: #fff5f5;
+    }
+</style>
+
+<script>
+    function selectType(el, type) {
+        document.querySelectorAll('.report-type-card').forEach(c => c.classList.remove('selected'));
+        el.classList.add('selected');
+        document.getElementById('selectedType').value = type;
+    }
+
+    function submitReport(e) {
+        e.preventDefault();
+        const subject = document.getElementById('reportSubject').value.trim();
+        const desc = document.getElementById('reportDescription').value.trim();
+        if (!subject || !desc) return;
+
+        document.getElementById('reportForm').style.display = 'none';
+        document.getElementById('reportSuccess').style.display = 'block';
+    }
+</script>
+{% endblock %}

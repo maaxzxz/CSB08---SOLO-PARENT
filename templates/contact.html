@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+
+{% block title %}Contact MSWDO - Solo Parent DSS{% endblock %}
+
+{% block content %}
+<!-- Page Header -->
+<section style="background: linear-gradient(135deg, #002d5f 0%, #001a36 100%); color: white; padding: 3rem 0;">
+    <div class="container">
+        <a href="/" class="text-white text-decoration-none small mb-3 d-inline-block" style="opacity:0.75;">
+            <i class="fas fa-arrow-left me-1"></i> Back to Home
+        </a>
+        <h1 style="color:white; font-size:2rem; margin-bottom:0.5rem;">
+            <i class="fas fa-phone-alt me-2" style="color:#f0a500;"></i> Contact & Support
+        </h1>
+        <p style="opacity:0.85; margin:0;">Reach out to your local MSWDO office or DSWD for official assistance.</p>
+    </div>
+</section>
+
+<section class="py-5">
+    <div class="container">
+
+        <!-- Disclaimer Banner -->
+        <div class="alert mb-5" style="background:#fff3cd; border-left:4px solid #f0a500; border-radius:6px; color:#7a5c00;">
+            <i class="fas fa-info-circle me-2"></i>
+            <strong>Note:</strong> This system is for demonstration purposes only. For official Solo Parent ID registration 
+            and benefit claims, please visit or contact your nearest MSWDO or DSWD office directly.
+        </div>
+
+        <div class="row g-4 mb-5">
+
+            <!-- DSWD Central -->
+            <div class="col-md-4">
+                <div class="card h-100 p-4" style="border-top:4px solid #002d5f !important;">
+                    <div class="mb-3" style="font-size:2rem; color:#002d5f;">
+                        <i class="fas fa-landmark"></i>
+                    </div>
+                    <h5 style="color:#002d5f; font-weight:700;">DSWD Central Office</h5>
+                    <p class="text-muted small mb-3">Department of Social Welfare and Development</p>
+                    <ul class="list-unstyled small" style="color:#444; line-height:2;">
+                        <li><i class="fas fa-map-marker-alt me-2 text-danger"></i> Constitution Hills, Batasan Pambansa Complex, Quezon City</li>
+                        <li><i class="fas fa-phone me-2 text-danger"></i> (02) 8931-8101 to 07</li>
+                        <li><i class="fas fa-envelope me-2 text-danger"></i> osec@dswd.gov.ph</li>
+                        <li><i class="fas fa-globe me-2 text-danger"></i>
+                            <a href="https://www.dswd.gov.ph" target="_blank" style="color:#002d5f;">www.dswd.gov.ph</a>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- DSWD Hotline -->
+            <div class="col-md-4">
+                <div class="card h-100 p-4" style="border-top:4px solid #8b0000 !important;">
+                    <div class="mb-3" style="font-size:2rem; color:#8b0000;">
+                        <i class="fas fa-headset"></i>
+                    </div>
+                    <h5 style="color:#8b0000; font-weight:700;">DSWD Hotline</h5>
+                    <p class="text-muted small mb-3">For general welfare inquiries and referrals</p>
+                    <ul class="list-unstyled small" style="color:#444; line-height:2.2;">
+                        <li>
+                            <span class="fw-bold" style="font-size:1.6rem; color:#8b0000; letter-spacing:1px;">
+                                <i class="fas fa-phone-volume me-2"></i>8888
+                            </span>
+                            <br><span class="text-muted" style="font-size:0.8rem;">Citizens' Hotline (24/7)</span>
+                        </li>
+                        <li class="mt-2"><i class="fas fa-mobile-alt me-2 text-danger"></i> 0917-111-8888</li>
+                        <li><i class="fas fa-fax me-2 text-danger"></i> (02) 8931-8191</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Local MSWDO -->
+            <div class="col-md-4">
+                <div class="card h-100 p-4" style="border-top:4px solid #f0a500 !important;">
+                    <div class="mb-3" style="font-size:2rem; color:#f0a500;">
+                        <i class="fas fa-city"></i>
+                    </div>
+                    <h5 style="color:#002d5f; font-weight:700;">Local MSWDO Office</h5>
+                    <p class="text-muted small mb-3">Municipal/City Social Welfare and Development Office</p>
+                    <p class="small" style="color:#444;">
+                        Visit the MSWDO in your municipality or city to apply for your Solo Parent ID. 
+                        Bring the required supporting documents for verification.
+                    </p>
+                    <a href="https://www.dswd.gov.ph/dswd-field-offices/" target="_blank"
+                       class="btn btn-sm btn-outline-secondary mt-2">
+                        <i class="fas fa-map me-1"></i> Find DSWD Field Office
+                    </a>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Required Documents -->
+        <div class="row mb-5">
+            <div class="col-lg-8 mx-auto">
+                <div class="card p-4">
+                    <h5 style="color:#002d5f; font-weight:700; margin-bottom:1.2rem;">
+                        <i class="fas fa-folder-open me-2 text-danger"></i> Documents to Bring
+                    </h5>
+                    <p class="small text-muted mb-3">Prepare the following before visiting your MSWDO office:</p>
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <ul class="small mb-0" style="color:#444; line-height:2;">
+                                <li>Duly accomplished application form</li>
+                                <li>Birth certificate of child/children (PSA copy)</li>
+                                <li>Valid government-issued ID</li>
+                                <li>Proof of income (payslip, Certificate of Employment, or sworn affidavit)</li>
+                            </ul>
+                        </div>
+                        <div class="col-md-6">
+                            <ul class="small mb-0" style="color:#444; line-height:2;">
+                                <li>Death certificate of spouse (if applicable)</li>
+                                <li>Certificate of legal separation/annulment (if applicable)</li>
+                                <li>Barangay certification of residency</li>
+                                <li>2x2 ID photos (2 copies)</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Report a System Issue -->
+        <div class="row">
+            <div class="col-lg-8 mx-auto">
+                <div class="card p-4" style="border-top:4px solid #002d5f !important;">
+                    <h5 style="color:#002d5f; font-weight:700; margin-bottom:0.5rem;">
+                        <i class="fas fa-bug me-2 text-danger"></i> Report a System Issue
+                    </h5>
+                    <p class="small text-muted mb-3">Found a problem with this tool? Let us know.</p>
+                    <form>
+                        <div class="mb-3">
+                            <label class="form-label">Your Name</label>
+                            <input type="text" class="form-control" placeholder="e.g. Maria Santos">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Email Address</label>
+                            <input type="email" class="form-control" placeholder="e.g. maria@email.com">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Issue Description</label>
+                            <textarea class="form-control" rows="4"
+                                placeholder="Describe the issue you encountered..."></textarea>
+                        </div>
+                        <button type="button" class="btn btn-danger">
+                            <i class="fas fa-paper-plane me-2"></i> Submit Report
+                        </button>
+                        <span class="small text-muted ms-3">
+                            <i class="fas fa-lock me-1"></i> Your report is processed anonymously.
+                        </span>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+    </div>
+</section>
+{% endblock %}

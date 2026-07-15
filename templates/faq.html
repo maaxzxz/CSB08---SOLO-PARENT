@@ -1,0 +1,222 @@
+{% extends "base.html" %}
+
+{% block title %}FAQ - Solo Parent DSS{% endblock %}
+
+{% block content %}
+<!-- Page Header -->
+<section style="background: linear-gradient(135deg, #002d5f 0%, #001a36 100%); color: white; padding: 3rem 0;">
+    <div class="container">
+        <a href="/" class="text-white text-decoration-none small mb-3 d-inline-block" style="opacity:0.75;">
+            <i class="fas fa-arrow-left me-1"></i> Back to Home
+        </a>
+        <h1 style="color:white; font-size:2rem; margin-bottom:0.5rem;">
+            <i class="fas fa-question-circle me-2" style="color:#f0a500;"></i> Frequently Asked Questions
+        </h1>
+        <p style="opacity:0.85; margin:0;">Common questions about the Solo Parent DSS and RA 11861.</p>
+    </div>
+</section>
+
+<section class="py-5">
+    <div class="container">
+        <div class="row">
+            <div class="col-lg-8 mx-auto">
+
+                <!-- Category: About the System -->
+                <div class="mb-5">
+                    <h5 style="color:#8b0000; font-size:0.8rem; font-weight:700; text-transform:uppercase; letter-spacing:1px; border-bottom:2px solid #8b0000; padding-bottom:0.5rem; margin-bottom:1.5rem;">
+                        About the System
+                    </h5>
+
+                    <div class="accordion" id="faqSystem">
+
+                        <div class="accordion-item border mb-2" style="border-radius:8px; overflow:hidden;">
+                            <h2 class="accordion-header">
+                                <button class="accordion-button collapsed fw-semibold" type="button"
+                                    data-bs-toggle="collapse" data-bs-target="#faq1"
+                                    style="background:#f8f9fa; color:#002d5f; font-size:0.95rem;">
+                                    What is the Solo Parent Decision Support System?
+                                </button>
+                            </h2>
+                            <div id="faq1" class="accordion-collapse collapse" data-bs-parent="#faqSystem">
+                                <div class="accordion-body" style="font-size:0.95rem; color:#444;">
+                                    The Solo Parent Decision Support System (DSS) is an AI-powered eligibility
+                                    screening tool designed to help solo parent applicants and MSWDO staff assess
+                                    eligibility under <strong>Republic Act 11861</strong> — the Solo Parent Welfare Act.
+                                    It provides a fast, consistent first-pass result before the official manual review.
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="accordion-item border mb-2" style="border-radius:8px; overflow:hidden;">
+                            <h2 class="accordion-header">
+                                <button class="accordion-button collapsed fw-semibold" type="button"
+                                    data-bs-toggle="collapse" data-bs-target="#faq2"
+                                    style="background:#f8f9fa; color:#002d5f; font-size:0.95rem;">
+                                    Is this system the official DSWD/LGU registration portal?
+                                </button>
+                            </h2>
+                            <div id="faq2" class="accordion-collapse collapse" data-bs-parent="#faqSystem">
+                                <div class="accordion-body" style="font-size:0.95rem; color:#444;">
+                                    <strong>No.</strong> This system is for <em>demonstration and pre-screening purposes only</em>.
+                                    It does not replace the official MSWDO application process. Applicants must still
+                                    visit their local MSWDO office to submit documents and complete formal registration.
+                                    The result generated here is an <em>advisory assessment</em>, not an official determination.
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="accordion-item border mb-2" style="border-radius:8px; overflow:hidden;">
+                            <h2 class="accordion-header">
+                                <button class="accordion-button collapsed fw-semibold" type="button"
+                                    data-bs-toggle="collapse" data-bs-target="#faq3"
+                                    style="background:#f8f9fa; color:#002d5f; font-size:0.95rem;">
+                                    Who can use this system?
+                                </button>
+                            </h2>
+                            <div id="faq3" class="accordion-collapse collapse" data-bs-parent="#faqSystem">
+                                <div class="accordion-body" style="font-size:0.95rem; color:#444;">
+                                    This system may be used by:
+                                    <ul class="mt-2 mb-0">
+                                        <li><strong>Solo parent applicants</strong> — to check initial eligibility before going to the MSWDO office.</li>
+                                        <li><strong>MSWDO/LGU staff</strong> — to triage and pre-screen applications faster.</li>
+                                        <li><strong>Researchers and students</strong> — to study AI-assisted welfare eligibility systems.</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+
+                <!-- Category: Eligibility -->
+                <div class="mb-5">
+                    <h5 style="color:#8b0000; font-size:0.8rem; font-weight:700; text-transform:uppercase; letter-spacing:1px; border-bottom:2px solid #8b0000; padding-bottom:0.5rem; margin-bottom:1.5rem;">
+                        Eligibility & Benefits
+                    </h5>
+                    <div class="accordion" id="faqElig">
+
+                        <div class="accordion-item border mb-2" style="border-radius:8px; overflow:hidden;">
+                            <h2 class="accordion-header">
+                                <button class="accordion-button collapsed fw-semibold" type="button"
+                                    data-bs-toggle="collapse" data-bs-target="#faq4"
+                                    style="background:#f8f9fa; color:#002d5f; font-size:0.95rem;">
+                                    Who qualifies as a solo parent under RA 11861?
+                                </button>
+                            </h2>
+                            <div id="faq4" class="accordion-collapse collapse" data-bs-parent="#faqElig">
+                                <div class="accordion-body" style="font-size:0.95rem; color:#444;">
+                                    A solo parent is any individual who falls under at least one of these situations:
+                                    <ul class="mt-2 mb-0">
+                                        <li>Spouse has died and has not remarried</li>
+                                        <li>Legally separated, annulled, or abandoned by spouse</li>
+                                        <li>Unmarried parent bearing/raising a child</li>
+                                        <li>Any person who solely provides parental care to a child</li>
+                                        <li>Parent whose spouse is incarcerated or incapacitated</li>
+                                    </ul>
+                                    <p class="mt-2 mb-0 text-muted" style="font-size:0.85rem;">Refer to Section 3 of RA 11861 for the full definition.</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="accordion-item border mb-2" style="border-radius:8px; overflow:hidden;">
+                            <h2 class="accordion-header">
+                                <button class="accordion-button collapsed fw-semibold" type="button"
+                                    data-bs-toggle="collapse" data-bs-target="#faq5"
+                                    style="background:#f8f9fa; color:#002d5f; font-size:0.95rem;">
+                                    What benefits can a qualified solo parent receive?
+                                </button>
+                            </h2>
+                            <div id="faq5" class="accordion-collapse collapse" data-bs-parent="#faqElig">
+                                <div class="accordion-body" style="font-size:0.95rem; color:#444;">
+                                    <ul class="mb-0">
+                                        <li><strong>₱1,000 Monthly Cash Subsidy</strong> — for those earning minimum wage or below (Sec. 15a)</li>
+                                        <li><strong>VAT Exemption & Discounts</strong> — on goods for children aged 0–6 (Sec. 15b)</li>
+                                        <li><strong>PhilHealth Coverage</strong> — priority enrollment</li>
+                                        <li><strong>Livelihood & Housing</strong> — priority access to government programs</li>
+                                        <li><strong>Educational Support</strong> — scholarships and tuition assistance (Sec. 9)</li>
+                                        <li><strong>Flexible Work Arrangements</strong> — right to request from employers</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="accordion-item border mb-2" style="border-radius:8px; overflow:hidden;">
+                            <h2 class="accordion-header">
+                                <button class="accordion-button collapsed fw-semibold" type="button"
+                                    data-bs-toggle="collapse" data-bs-target="#faq6"
+                                    style="background:#f8f9fa; color:#002d5f; font-size:0.95rem;">
+                                    If the system says I am eligible, am I automatically registered?
+                                </button>
+                            </h2>
+                            <div id="faq6" class="accordion-collapse collapse" data-bs-parent="#faqElig">
+                                <div class="accordion-body" style="font-size:0.95rem; color:#444;">
+                                    <strong>No.</strong> The system's result is advisory. You must still proceed to your 
+                                    local MSWDO office to submit the required documents and complete the official 
+                                    registration. This tool only helps you understand if you are likely eligible based 
+                                    on your answers.
+                                </div>
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+
+                <!-- Category: Privacy -->
+                <div class="mb-5">
+                    <h5 style="color:#8b0000; font-size:0.8rem; font-weight:700; text-transform:uppercase; letter-spacing:1px; border-bottom:2px solid #8b0000; padding-bottom:0.5rem; margin-bottom:1.5rem;">
+                        Privacy & Data
+                    </h5>
+                    <div class="accordion" id="faqPriv">
+
+                        <div class="accordion-item border mb-2" style="border-radius:8px; overflow:hidden;">
+                            <h2 class="accordion-header">
+                                <button class="accordion-button collapsed fw-semibold" type="button"
+                                    data-bs-toggle="collapse" data-bs-target="#faq7"
+                                    style="background:#f8f9fa; color:#002d5f; font-size:0.95rem;">
+                                    Is my personal information stored?
+                                </button>
+                            </h2>
+                            <div id="faq7" class="accordion-collapse collapse" data-bs-parent="#faqPriv">
+                                <div class="accordion-body" style="font-size:0.95rem; color:#444;">
+                                    <strong>No.</strong> This system does not retain, log, or store any personal data 
+                                    after your session ends. All processing is done locally in memory during the session only.
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="accordion-item border mb-2" style="border-radius:8px; overflow:hidden;">
+                            <h2 class="accordion-header">
+                                <button class="accordion-button collapsed fw-semibold" type="button"
+                                    data-bs-toggle="collapse" data-bs-target="#faq8"
+                                    style="background:#f8f9fa; color:#002d5f; font-size:0.95rem;">
+                                    Is the system compliant with the Data Privacy Act?
+                                </button>
+                            </h2>
+                            <div id="faq8" class="accordion-collapse collapse" data-bs-parent="#faqPriv">
+                                <div class="accordion-body" style="font-size:0.95rem; color:#444;">
+                                    Yes. This system is designed with privacy-by-default principles. No personal data is 
+                                    collected, transmitted to third parties, or persisted. The system complies with the 
+                                    principles of <strong>Republic Act 10173 (Data Privacy Act of 2012)</strong>.
+                                </div>
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+
+                <!-- CTA -->
+                <div class="text-center p-4 rounded" style="background:#f0f4f8;">
+                    <p class="mb-3" style="color:#444;">Have more questions? Reach out to your local MSWDO office.</p>
+                    <a href="/contact" class="btn btn-danger me-2">
+                        <i class="fas fa-phone me-1"></i> Contact MSWDO
+                    </a>
+                    <a href="/assessment" class="btn btn-outline-secondary">
+                        <i class="fas fa-file-alt me-1"></i> Start Assessment
+                    </a>
+                </div>
+
+            </div>
+        </div>
+    </div>
+</section>
+{% endblock %}

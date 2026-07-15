@@ -320,6 +320,20 @@ marked it required client-side).
 - **Duplicate detection key is now name + birthday** (server and JS): a father and son
   sharing a name are no longer wrongly blocked; the same person listed twice still is.
 
+## UX follow-up: "Child" rows now count as dependents (user-reported)
+A parent who listed their kid with relationship "Child" was told to "add at least one
+dependent" — only rows labeled "Dependent" counted (a round-1 design choice treating
+"Child" as filiation-only). The relationship label was doing a job the qualification
+criteria already do: grown/married/employed children are excluded by the unmarried /
+unemployed / age-cap filters regardless of label.
+**Fix (server `derive_dependent_children` + JS mirror + help text):**
+- Both "Dependent" and "Child" rows now qualify, subject to the same RA 11861 criteria.
+- Below the PH minimum working age (15, `MINIMUM_EMPLOYMENT_AGE`), occupation text like
+  "Grade 1"/"Pupil" no longer marks a child as employed (a declared income still does).
+- When zero dependents qualify, the form now explains per row WHY each child-type row
+  was not counted (married / over 22 / employed / missing birthday) instead of the
+  generic "add a dependent" message (`dependentRowStatus()`).
+
 ## UX: missing-required-field highlighting (user-reported)
 The form previously scrolled to the top on an incomplete submit with no indication of
 what was missing. Now (`assessment_form.html`, form is `novalidate` with JS-driven

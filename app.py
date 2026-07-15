@@ -281,12 +281,23 @@ EDUCATION_MINIMUM_AGE = {
 MIN_PARENT_CHILD_AGE_GAP = 12
 
 
-# ONLY the "Dependent" relationship represents a dependent child that counts
-# toward "Number of Dependent Children" and "Age of Youngest Dependent Child".
-# "Child" (the applicant's son/daughter) is informational filiation only — a
-# grown/employed/married child is a child but NOT a dependent. To be counted
-# as a dependent, mark the relationship "Dependent".
-DEPENDENT_RELATIONSHIP = 'dependent'
+# Relationships that can represent a dependent child, counting toward
+# "Number of Dependent Children" and "Age of Youngest Dependent Child".
+# Both "Dependent" and "Child" rows are considered — whether a row actually
+# COUNTS is decided by RA 11861's qualification criteria (unmarried,
+# unemployed, within the age cap), so a grown/married/employed child is
+# excluded by those filters, not by the relationship label. "Child" used to
+# be informational-only, but that silently rejected any parent who naturally
+# listed their kid as "Child" instead of "Dependent".
+DEPENDENT_RELATIONSHIPS = {'dependent', 'child'}
+
+# Minimum lawful working age in the Philippines (RA 9231 permits light work
+# from age 15). A member younger than this is never counted as "employed"
+# from their occupation text — parents often type things like "Grade 1",
+# "Pupil", or "Daycare" in a young child's occupation column, none of which
+# should disqualify the child as a dependent. A declared income still counts
+# as earning regardless of age.
+MINIMUM_EMPLOYMENT_AGE = 15
 
 # Occupation values (beyond the applicant-level NO_OCCUPATION_SYNONYMS, which
 # is defined later and resolved at call time) that mean a household member is
@@ -306,6 +317,12 @@ def _member_is_employed(member):
     try:
         if float(member.get('income') or 0) > 0:
             return True
+    except (TypeError, ValueError):
+        pass
+    # Below the minimum working age, occupation text can't mean employment.
+    try:
+        if int(str(member.get('age', '')).strip()) < MINIMUM_EMPLOYMENT_AGE:
+            return False
     except (TypeError, ValueError):
         pass
     occ = str(member.get('occupation', '')).strip().lower().strip('.')
@@ -338,9 +355,11 @@ def derive_dependent_children(family_members, is_pregnancy=False):
         purposes of availing the benefits under this Act."
 
     So a household member counts as a DEPENDENT CHILD only if their
-    relationship is "Dependent" AND they are unmarried AND UNEMPLOYED AND
-    within the dependent age cap (22 or younger, or older only if that member
-    is a PWD). "Child" rows are never counted. An EMPLOYED member does NOT
+    relationship is "Dependent" or "Child" AND they are unmarried AND
+    UNEMPLOYED AND within the dependent age cap (22 or younger, or older
+    only if that member is a PWD). The qualification criteria — not the
+    relationship label — do the filtering: a grown, married, or employed
+    child is excluded by them automatically. An EMPLOYED member does NOT
     qualify as a dependent at all — there is no exception for this in the
     law. If employment removes the applicant's only dependent, the count
     drops to zero and the applicant is Not Eligible (see assess_eligibility,
@@ -361,7 +380,7 @@ def derive_dependent_children(family_members, is_pregnancy=False):
     any_pwd = False
     school_level_ok = False
     for m in family_members:
-        if str(m.get('relationship', '')).strip().lower() != DEPENDENT_RELATIONSHIP:
+        if str(m.get('relationship', '')).strip().lower() not in DEPENDENT_RELATIONSHIPS:
             continue
         if str(m.get('civil_status', '')).strip().lower() in ('married', 'widowed'):
             continue  # a dependent child is unmarried
