@@ -96,7 +96,7 @@
                             <div class="row">
                                 <div class="col-md-4 mb-3">
                                     <label for="contact_no" class="form-label">Contact No. <span class="text-danger">*</span></label>
-                                    <input type="tel" class="form-control numeric-only" id="contact_no" name="contact_no" placeholder="09xxxxxxxxx" inputmode="numeric" pattern="[0-9]{7,15}" maxlength="15" required>
+                                    <input type="tel" class="form-control numeric-only" id="contact_no" name="contact_no" placeholder="09xxxxxxxxx" inputmode="numeric" pattern="09[0-9]{9}" maxlength="11" title="Enter an 11-digit PH mobile number starting with 09" required>
                                 </div>
                                 <div class="col-md-4 mb-3">
                                     <label for="educational_attainment" class="form-label">Educational Attainment</label>
@@ -134,21 +134,31 @@
                         <!-- SECTION II: FAMILY COMPOSITION -->
                         <div class="form-section mb-5">
                             <h5 class="section-title">II. FAMILY COMPOSITION</h5>
-                            <p class="text-muted small mb-3">List all members of the household</p>
+                            <p class="text-muted small mb-1">List all members of the household.
+                                <a href="#dependentInfo" data-bs-toggle="collapse" role="button" aria-expanded="false" aria-controls="dependentInfo" class="text-decoration-none">
+                                    <i class="fas fa-info-circle"></i> Who counts as a dependent child?
+                                </a>
+                            </p>
+                            <div class="collapse mb-3" id="dependentInfo">
+                                <div class="alert alert-info small mb-0">
+                                    Per RA 11861, only a member whose relationship is "<strong>Dependent</strong>" counts as a dependent child &mdash; and only if they are <strong>unmarried</strong>, <strong>unemployed</strong>, and 22 years old or younger (or older only if unable to care for themselves due to disability).
+                                </div>
+                            </div>
 
                             <div class="table-responsive mb-3">
                                 <table class="table table-bordered table-sm" id="familyTable">
                                     <thead class="table-light">
                                         <tr>
-                                            <th style="width: 15%">Name</th>
-                                            <th style="width: 10%">Relationship</th>
-                                            <th style="width: 10%">Birthday</th>
-                                            <th style="width: 7%">Age</th>
-                                            <th style="width: 10%">Civil Status</th>
-                                            <th style="width: 12%">Education</th>
-                                            <th style="width: 14%">Occupation</th>
-                                            <th style="width: 16%">Income (PHP)</th>
-                                            <th style="width: 6%">Action</th>
+                                            <th style="width: 14%">Name</th>
+                                            <th style="width: 11%">Relationship</th>
+                                            <th style="width: 9%">Birthday</th>
+                                            <th style="width: 6%">Age</th>
+                                            <th style="width: 9%">Civil Status</th>
+                                            <th style="width: 10%">Education</th>
+                                            <th style="width: 12%">Occupation</th>
+                                            <th style="width: 6%">PWD</th>
+                                            <th style="width: 14%">Income (PHP)</th>
+                                            <th style="width: 5%">Action</th>
                                         </tr>
                                     </thead>
                                     <tbody id="familyMembers"></tbody>
@@ -257,7 +267,7 @@
 
                             <div class="mb-3">
                                 <label for="number_of_dependent_children" class="form-label">Number of Dependent Children <span class="text-danger">*</span></label>
-                                <input type="number" class="form-control numeric-only" id="number_of_dependent_children" name="number_of_dependent_children" min="1" max="20" step="1" inputmode="numeric" required>
+                                <input type="number" class="form-control" id="number_of_dependent_children" name="number_of_dependent_children" min="0" max="20" step="1" inputmode="numeric" readonly required>
                             </div>
 
                             <div class="mb-3">
@@ -290,8 +300,7 @@
 
                             <div class="mb-3">
                                 <label for="youngest_child_age" class="form-label">Age of Youngest Dependent Child <span class="text-danger">*</span></label>
-                                <input type="number" class="form-control" id="youngest_child_age" name="youngest_child_age" min="-1" max="99" step="1" inputmode="numeric" required>
-                                <small class="text-muted">Enter -1 if the child is unborn (pregnancy category).</small>
+                                <input type="number" class="form-control" id="youngest_child_age" name="youngest_child_age" min="-1" max="99" step="1" inputmode="numeric" readonly required>
                             </div>
 
                             <div class="mb-3">
@@ -418,6 +427,25 @@
     .form-check-input:disabled ~ .form-check-label {
         color: #adb5bd;
     }
+
+    /* Make the AVAILABLE (selectable) solo-parent-status options clearly
+       visible in strong black, so they stand out from the greyed-out
+       disabled ones — both the label text AND the radio control itself. */
+    .form-check-group-2col .form-check-input:not(:disabled) ~ .form-check-label {
+        color: #111;
+        font-weight: 600;
+    }
+    .form-check-group-2col .form-check-input:not(:disabled) {
+        border-color: #111;
+        accent-color: #111;
+    }
+    .form-check-group-2col .form-check-input:not(:disabled):checked {
+        background-color: #111;
+        border-color: #111;
+    }
+    .form-check-group-2col .form-check-input:disabled {
+        border-color: #ced4da;
+    }
 </style>
 
 <script>
@@ -439,7 +467,7 @@
         document.querySelectorAll('input[name="solo_parent_status"]').forEach(function(radio) {
             radio.addEventListener('change', function() {
                 toggleCategoryFollowUp();
-                applyYoungestChildAgeGate();
+                syncDependentFieldsFromRoster();
             });
         });
 
@@ -454,7 +482,132 @@
                 recalculateTotalFamilyIncome();
             }
         });
+        // Relationship / civil status are <select> -> fire 'change', not
+        // 'input'. Re-sync the dependent count/youngest-age when either
+        // changes (both affect whether a row qualifies as a dependent child).
+        document.getElementById('familyMembers').addEventListener('change', function(e) {
+            if (e.target.name && (e.target.name.startsWith('family_relationship_')
+                    || e.target.name.startsWith('family_civil_status_')
+                    || e.target.name.startsWith('family_pwd_'))) {
+                syncDependentFieldsFromRoster();
+            }
+        });
+
+        // The PWD answer relaxes the dependent age cap, so re-sync on change.
+        document.querySelectorAll('input[name="with_pwd"]').forEach(function(radio) {
+            radio.addEventListener('change', syncDependentFieldsFromRoster);
+        });
+
+        document.getElementById('applicationForm').addEventListener('submit', function(e) {
+            const problems = validateApplicant().concat(validateFamilyRows());
+            if (problems.length) {
+                e.preventDefault();
+                alert('Please correct the following before submitting:\n\n- ' + problems.join('\n- '));
+            }
+        });
     });
+
+    function computeAgeFromDate(dateStr) {
+        if (!dateStr) return null;
+        const birth = new Date(dateStr);
+        if (isNaN(birth.getTime())) return null;
+        const today = new Date();
+        let age = today.getFullYear() - birth.getFullYear();
+        const md = today.getMonth() - birth.getMonth();
+        if (md < 0 || (md === 0 && today.getDate() < birth.getDate())) age--;
+        return age;
+    }
+
+    // Applicant-level pre-submit checks: a solo parent must be an adult, and
+    // a marriage-implying civil status is impossible below the marriage age.
+    const MARRIAGE_IMPLYING_STATUSES = ['married', 'widowed', 'separated', 'annulled', 'divorced'];
+    function validateApplicant() {
+        const problems = [];
+        const birthday = document.getElementById('birthday').value;
+        const age = computeAgeFromDate(birthday);
+        if (age === null) return problems;
+        const civilEl = document.querySelector('input[name="civil_status"]:checked');
+        const civil = civilEl ? civilEl.value.toLowerCase() : '';
+
+        if (age < MINIMUM_MARRIAGE_AGE && MARRIAGE_IMPLYING_STATUSES.indexOf(civil) !== -1) {
+            problems.push('Applicant is too young (age ' + age + ') to have a civil status of "' +
+                toTitleCase(civil) + '"; the minimum marriage age is ' + MINIMUM_MARRIAGE_AGE + '.');
+        } else if (age < 18) {
+            problems.push('Applicant must be at least 18 years old to apply as a solo parent (current age: ' + age + ').');
+        }
+
+        // Non-pregnancy applicants need at least one dependent (relationship
+        // "Dependent") in the roster — the auto-filled count field is
+        // read-only, so native "required" validation won't catch a 0 here.
+        const selectedReason = document.querySelector('input[name="solo_parent_status"]:checked');
+        const isPregnancy = selectedReason && selectedReason.value === 'pregnant_woman_unborn_child';
+        const num = parseInt(document.getElementById('number_of_dependent_children').value, 10) || 0;
+        if (!isPregnancy && num < 1) {
+            problems.push('Add at least one dependent in the family composition (relationship "Dependent").');
+        }
+
+        // Suggestion #5: PH mobile number.
+        const contact = (document.getElementById('contact_no').value || '').replace(/[^0-9]/g, '');
+        if (contact && !/^09\d{9}$/.test(contact)) {
+            problems.push('Contact number must be a valid Philippine mobile number (e.g. 09XXXXXXXXX).');
+        }
+        return problems;
+    }
+
+    // Client mirror of app.py validate_family_members(): a household member's
+    // age must be consistent with their civil status and education. Server
+    // re-validates authoritatively; this just gives immediate feedback.
+    const MINIMUM_MARRIAGE_AGE = 18;
+    const EDUCATION_MINIMUM_AGE = {
+        'elementary': 5, 'high school': 12, 'vocational': 15, 'college': 16, 'postgraduate': 21
+    };
+
+    function validateFamilyRows() {
+        const problems = [];
+        const nameCounts = {};
+        document.querySelectorAll('#familyMembers tr').forEach(function(row) {
+            const nameEl = row.querySelector('input[name^="family_name_"]');
+            const ageEl = row.querySelector('input[name^="family_age_"]');
+            const civilEl = row.querySelector('select[name^="family_civil_status_"]');
+            const educEl = row.querySelector('select[name^="family_educ_"]');
+            const relEl = row.querySelector('select[name^="family_relationship_"]');
+            const rawName = nameEl && nameEl.value.trim();
+            if (rawName) {
+                const key = rawName.toLowerCase();
+                nameCounts[key] = (nameCounts[key] || 0) + 1;
+            }
+            const name = rawName || 'A family member';
+            const civil = civilEl ? civilEl.value.toLowerCase() : '';
+            const relationship = relEl ? relEl.value.toLowerCase() : '';
+
+            // A "Dependent" must be unmarried by definition.
+            if (relationship === 'dependent' && (civil === 'married' || civil === 'widowed')) {
+                problems.push(name + ': cannot be marked "Dependent" while their civil status is ' +
+                    (civilEl ? civilEl.value : civil) + ' — a dependent child must be unmarried.');
+            }
+
+            if (!ageEl || ageEl.value === '') return;
+            const age = parseInt(ageEl.value, 10);
+            if (isNaN(age)) return;
+            const educ = educEl ? educEl.value.toLowerCase() : '';
+            if ((civil === 'married' || civil === 'widowed') && age < MINIMUM_MARRIAGE_AGE) {
+                problems.push(name + ': age ' + age + ' cannot be ' + civilEl.value +
+                    ' (minimum marriage age is ' + MINIMUM_MARRIAGE_AGE + ').');
+            }
+            if (EDUCATION_MINIMUM_AGE[educ] !== undefined && age < EDUCATION_MINIMUM_AGE[educ]) {
+                problems.push(name + ': age ' + age + ' is too young for ' + educEl.value +
+                    ' (typically age ' + EDUCATION_MINIMUM_AGE[educ] + '+).');
+            }
+        });
+        // Suggestion #4: duplicate family members.
+        Object.keys(nameCounts).forEach(function(key) {
+            if (nameCounts[key] > 1) {
+                problems.push('"' + toTitleCase(key) + '" is listed ' + nameCounts[key] +
+                    ' times in the family composition — remove the duplicate.');
+            }
+        });
+        return problems;
+    }
 
     function getTodayStr() {
         return new Date().toISOString().split('T')[0];
@@ -617,19 +770,54 @@
         }
 
         toggleCategoryFollowUp();
-        applyYoungestChildAgeGate();
+        syncDependentFieldsFromRoster();
     }
 
-    // #5: the -1 "unborn" value for youngest child age is only meaningful for
-    // the pregnancy category; otherwise require a real age (>= 0).
-    function applyYoungestChildAgeGate() {
+    // Auto-derive "Number of Dependent Children" and "Age of Youngest
+    // Dependent Child" (both read-only) from the family composition. Mirrors
+    // the server's derive_dependent_children(): a household member counts ONLY
+    // if their relationship is "Dependent" (a "Child" row is filiation info,
+    // never counted), they are unmarried, and they are within the dependent
+    // age cap (<= 22, or over it only if that member is a PWD, or the
+    // applicant declared a PWD). Employment does NOT remove a dependent.
+    // Pregnancy category: the unborn child (age -1) is the youngest and is
+    // included in the count.
+    const MAX_DEPENDENT_AGE = 22;
+    function syncDependentFieldsFromRoster() {
+        const numField = document.getElementById('number_of_dependent_children');
+        const youngestField = document.getElementById('youngest_child_age');
+        if (!numField || !youngestField) return;
+
+        const pwdEl = document.querySelector('input[name="with_pwd"]:checked');
+        const applicantPwd = pwdEl && pwdEl.value === 'Yes';
+
+        const ages = [];
+        document.querySelectorAll('#familyMembers tr').forEach(function(row) {
+            const relEl = row.querySelector('select[name^="family_relationship_"]');
+            const ageEl = row.querySelector('input[name^="family_age_"]');
+            const civilEl = row.querySelector('select[name^="family_civil_status_"]');
+            const pwdRowEl = row.querySelector('select[name^="family_pwd_"]');
+            if (!relEl || !ageEl) return;
+            if (relEl.value.toLowerCase() !== 'dependent') return;       // only "Dependent" counts
+            const civil = civilEl ? civilEl.value.toLowerCase() : '';
+            if (civil === 'married' || civil === 'widowed') return;      // must be unmarried
+            if (ageEl.value === '') return;
+            const a = parseInt(ageEl.value, 10);
+            if (isNaN(a) || a < 0) return;
+            const memberPwd = pwdRowEl && pwdRowEl.value === 'Yes';
+            if (a > MAX_DEPENDENT_AGE && !memberPwd && !applicantPwd) return;  // within dependent age range
+            ages.push(a);
+        });
+
         const selected = document.querySelector('input[name="solo_parent_status"]:checked');
         const isPregnancy = selected && selected.value === 'pregnant_woman_unborn_child';
-        const field = document.getElementById('youngest_child_age');
-        if (!field) return;
-        field.min = isPregnancy ? '-1' : '0';
-        if (!isPregnancy && field.value === '-1') {
-            field.value = '';
+
+        if (isPregnancy) {
+            youngestField.value = '-1';               // unborn is the youngest
+            numField.value = ages.length + 1;         // include the unborn child
+        } else {
+            numField.value = ages.length;
+            youngestField.value = ages.length ? Math.min.apply(null, ages) : '';
         }
     }
 
@@ -672,10 +860,11 @@
             <td>
                 <select class="form-select form-select-sm" name="family_relationship_${rowIndex}" required>
                     <option value="">Select</option>
-                    <option value="Child">Child</option>
                     <option value="Dependent">Dependent</option>
+                    <option value="Child">Child</option>
                     <option value="Parent">Parent</option>
                     <option value="Sibling">Sibling</option>
+                    <option value="Spouse">Spouse</option>
                     <option value="Other">Other</option>
                 </select>
             </td>
@@ -701,6 +890,12 @@
                 </select>
             </td>
             <td><input type="text" class="form-control form-control-sm capitalize-input" name="family_occupation_${rowIndex}" placeholder="Occupation" required></td>
+            <td>
+                <select class="form-select form-select-sm" name="family_pwd_${rowIndex}" required>
+                    <option value="No">No</option>
+                    <option value="Yes">Yes</option>
+                </select>
+            </td>
             <td><input type="text" class="form-control form-control-sm currency-input" name="family_income_${rowIndex}" inputmode="numeric" placeholder="0" required></td>
             <td><button type="button" class="btn-remove" onclick="removeRow(this)"><i class="fas fa-trash"></i></button></td>
         `;
@@ -709,6 +904,7 @@
         bindNumericHandlers(row);
         bindCurrencyHandlers(row);
         recalculateTotalFamilyIncome();
+        syncDependentFieldsFromRoster();
     }
 
     function recalculateTotalFamilyIncome() {
@@ -739,12 +935,14 @@
         if (age >= 0) {
             document.getElementById('age_' + rowIndex).value = age;
         }
+        syncDependentFieldsFromRoster();
     }
 
     function removeRow(button) {
         const row = button.closest('tr');
         row.remove();
         recalculateTotalFamilyIncome();
+        syncDependentFieldsFromRoster();
     }
 </script>
 {% endblock %}

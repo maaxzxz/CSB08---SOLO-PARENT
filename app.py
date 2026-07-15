@@ -201,12 +201,13 @@ REQUIRED_SUBMISSION_FIELDS = [
     ('civil_status', 'Civil status'),
     ('monthly_income', 'Monthly income'),
     ('solo_parent_status', 'Reason for being a solo parent'),
-    ('number_of_dependent_children', 'Number of dependent children'),
     ('with_pwd', 'PWD registration answer'),
-    ('youngest_child_age', 'Age of youngest dependent child'),
     ('receiving_other_govt_cash_aid', 'Other government cash aid answer'),
     ('formal_philhealth_member', 'PhilHealth membership answer'),
     ('dependent_currently_studying', 'Dependent currently studying answer'),
+    # number_of_dependent_children and youngest_child_age are intentionally
+    # NOT here: they're derived from the family composition
+    # (derive_dependent_children), not entered by the applicant.
 ]
 
 # Which solo-parent reasons are logically consistent with each civil status
@@ -235,17 +236,204 @@ CIVIL_STATUS_ALLOWED_REASONS = {
 # (#8). 100 years in months — anything beyond is a data-entry error.
 MAX_DURATION_MONTHS = 1200
 
+# Legal minimum age to marry in the Philippines (Family Code). A household
+# member below this cannot legitimately be recorded as Married or Widowed.
+MINIMUM_MARRIAGE_AGE = 18
 
-def count_dependent_roster_rows(family_members):
-    """How many household rows are plausibly the applicant's dependents —
-    relationship of Child or Dependent (used to sanity-check the declared
-    dependent-children count, #6)."""
-    count = 0
+# Minimum plausible age to have reached each educational attainment level.
+# Used to catch impossible family-member rows (e.g. a 5-year-old "College").
+# 'Pre-school' / blank have no minimum.
+EDUCATION_MINIMUM_AGE = {
+    'elementary': 5,
+    'high school': 12,
+    'vocational': 15,
+    'college': 16,
+    'postgraduate': 21,
+}
+
+# Minimum plausible age gap between a parent and their child. Used to catch
+# impossible household rows such as a 26-year-old listed as the applicant's
+# "Child" when the applicant is not old enough to be their parent.
+MIN_PARENT_CHILD_AGE_GAP = 12
+
+
+# ONLY the "Dependent" relationship represents a dependent child that counts
+# toward "Number of Dependent Children" and "Age of Youngest Dependent Child".
+# "Child" (the applicant's son/daughter) is informational filiation only — a
+# grown/employed/married child is a child but NOT a dependent. To be counted
+# as a dependent, mark the relationship "Dependent".
+DEPENDENT_RELATIONSHIP = 'dependent'
+
+# Occupation values (beyond the applicant-level NO_OCCUPATION_SYNONYMS, which
+# is defined later and resolved at call time) that mean a household member is
+# NOT employed and so can still be a dependent.
+_EXTRA_NOT_EMPLOYED_OCCUPATIONS = {
+    'student', 'studying', 'schooling', 'minor', 'baby', 'infant', 'toddler',
+    'child', 'kid', 'preschool', 'pre-school'
+}
+
+
+def _member_is_employed(member):
+    occ = str(member.get('occupation', '')).strip().lower().strip('.')
+    if not occ or occ in NO_OCCUPATION_SYNONYMS or occ in _EXTRA_NOT_EMPLOYED_OCCUPATIONS:
+        return False
+    return True
+
+
+def _member_is_pwd(member):
+    return str(member.get('pwd', '')).strip().lower() in ('yes', 'true', '1')
+
+
+# Education levels that satisfy the Sec. 9 educational-support scholarship.
+# RA 11861 Sec. 9 grants a scholarship for basic/higher/technical-vocational
+# education, but this system scopes it specifically to High School or College
+# per policy decision — Pre-school, Elementary, Vocational, and Postgraduate
+# are excluded.
+SCHOLARSHIP_ELIGIBLE_EDUCATION_LEVELS = {'high school', 'college'}
+
+
+def derive_dependent_children(family_members, is_pregnancy=False, applicant_with_pwd=False):
+    """Work out the dependent-child figures from the family composition, per
+    RA 11861's statutory definition of "children or dependents":
+
+        "...those living with and dependent upon the solo parent for support
+        who are UNMARRIED, UNEMPLOYED and twenty-two (22) years old or below,
+        or those over twenty-two (22) years old but who are unable to fully
+        take care or protect themselves ... because of a physical or mental
+        disability or condition ... this definition shall only apply for
+        purposes of availing the benefits under this Act."
+
+    So a household member counts as a DEPENDENT CHILD only if their
+    relationship is "Dependent" AND they are unmarried AND UNEMPLOYED AND
+    within the dependent age cap (22 or younger, or older only if that member
+    is a PWD). "Child" rows are never counted. An EMPLOYED member does NOT
+    qualify as a dependent at all — there is no exception for this in the
+    law. If employment removes the applicant's only dependent, the count
+    drops to zero and the applicant is Not Eligible (see assess_eligibility,
+    which surfaces the specific reason).
+
+    Returns a dict:
+      count             -> Number of Dependent Children (incl. the unborn for pregnancy)
+      youngest          -> Age of Youngest Dependent Child (-1 for an unborn)
+      excluded_employed -> names of "Dependent" rows disqualified for being employed
+      any_pwd           -> whether any counted dependent is a PWD
+      school_level_ok   -> whether any counted dependent's education is High
+                            School or College (gates the Sec. 9 scholarship)
+    """
+    max_dependent_age = ENGINE_RULES['thresholds'].get('max_dependent_age', 22)
+    ages = []
+    excluded_employed = []
+    any_pwd = False
+    school_level_ok = False
     for m in family_members:
-        rel = str(m.get('relationship', '')).strip().lower()
-        if rel in ('child', 'dependent'):
-            count += 1
-    return count
+        if str(m.get('relationship', '')).strip().lower() != DEPENDENT_RELATIONSHIP:
+            continue
+        if str(m.get('civil_status', '')).strip().lower() in ('married', 'widowed'):
+            continue  # a dependent child is unmarried
+        try:
+            age = int(str(m.get('age', '')).strip())
+        except (TypeError, ValueError):
+            continue
+        if age < 0:
+            continue
+        member_pwd = _member_is_pwd(m)
+        if age > max_dependent_age and not (member_pwd or applicant_with_pwd):
+            continue  # over the age cap and not a PWD -> not a dependent
+        if _member_is_employed(m):
+            # RA 11861's dependent definition requires UNEMPLOYED with no
+            # exception — an employed member is not a dependent under this
+            # Act, no matter their age or how the household actually relies
+            # on them.
+            excluded_employed.append(str(m.get('name', '')).strip() or 'a dependent')
+            continue
+        ages.append(age)
+        if member_pwd:
+            any_pwd = True
+        if str(m.get('education', '')).strip().lower() in SCHOLARSHIP_ELIGIBLE_EDUCATION_LEVELS:
+            school_level_ok = True
+
+    count = len(ages)
+    youngest = min(ages) if ages else None
+    if is_pregnancy:
+        youngest = -1               # unborn child is the youngest
+        count += 1                  # count the unborn child
+    return {
+        'count': count,
+        'youngest': youngest,
+        'excluded_employed': excluded_employed,
+        'any_pwd': any_pwd,
+        'school_level_ok': school_level_ok,
+    }
+
+
+def validate_family_members(family_members, applicant_age=None):
+    """Cross-field sanity checks on each family-composition row: an age must
+    be consistent with the member's civil status, educational attainment, and
+    (relative to the applicant) their relationship. Catches impossible rows
+    such as a 5-year-old marked Married, a toddler with a College education,
+    or a 26-year-old listed as the applicant's Child. Returns a list of hard
+    error strings."""
+    errors = []
+    for m in family_members:
+        name = str(m.get('name', '')).strip() or 'A family member'
+        try:
+            age = int(str(m.get('age', '')).strip())
+        except (TypeError, ValueError):
+            continue  # no usable age -> nothing to cross-check
+
+        if age < 0:
+            errors.append(f"{name}: age cannot be negative.")
+            continue
+
+        civil = str(m.get('civil_status', '')).strip().lower()
+        relationship = str(m.get('relationship', '')).strip().lower()
+
+        if civil in ('married', 'widowed') and age < MINIMUM_MARRIAGE_AGE:
+            errors.append(
+                f"{name}: age {age} cannot have a civil status of "
+                f"{m.get('civil_status')} (minimum marriage age is {MINIMUM_MARRIAGE_AGE})."
+            )
+
+        # A "Dependent" IS a dependent child by definition (see
+        # derive_dependent_children), and a dependent child must be
+        # unmarried. Letting someone be entered as both "Dependent" and
+        # "Married"/"Widowed" is a direct contradiction that was previously
+        # accepted silently (the row just got excluded from the count with
+        # no explanation) — now it's flagged instead, so the applicant knows
+        # to either fix the civil status or change the relationship to
+        # "Child" if this member is genuinely not a dependent.
+        if relationship == 'dependent' and civil in ('married', 'widowed'):
+            errors.append(
+                f'{name}: cannot be marked as "Dependent" while their civil status is '
+                f'{m.get("civil_status")}; a dependent child must be unmarried.'
+            )
+
+        education = str(m.get('education', '')).strip().lower()
+        min_edu_age = EDUCATION_MINIMUM_AGE.get(education)
+        if min_edu_age is not None and age < min_edu_age:
+            errors.append(
+                f"{name}: age {age} is too young for an educational attainment of "
+                f"{m.get('education')} (typically age {min_edu_age}+)."
+            )
+
+        # Relationship vs. applicant's age: a Child must be younger than the
+        # applicant by at least a plausible parenthood gap; a Parent must be
+        # correspondingly older.
+        if applicant_age:
+            if relationship == 'child' and (applicant_age - age) < MIN_PARENT_CHILD_AGE_GAP:
+                errors.append(
+                    f"{name}: age {age} is not consistent with being the applicant's child "
+                    f"(the applicant is {applicant_age}; a parent is normally at least "
+                    f"{MIN_PARENT_CHILD_AGE_GAP} years older than their child)."
+                )
+            elif relationship == 'parent' and (age - applicant_age) < MIN_PARENT_CHILD_AGE_GAP:
+                errors.append(
+                    f"{name}: age {age} is not consistent with being the applicant's parent "
+                    f"(the applicant is {applicant_age}; a parent is normally at least "
+                    f"{MIN_PARENT_CHILD_AGE_GAP} years older)."
+                )
+
+    return errors
 
 
 def evaluate_submission_guards(data, *, solo_parent_status, civil_status, sex,
@@ -300,14 +488,9 @@ def evaluate_submission_guards(data, *, solo_parent_status, civil_status, sex,
             f"({age} years) — the circumstance cannot predate the applicant."
         )
 
-    # #6 declared dependent count vs. the household roster (soft — the roster
-    # may legitimately omit some, so flag rather than block)
-    roster_dependents = count_dependent_roster_rows(family_members)
-    if number_of_children > 0 and roster_dependents < number_of_children:
-        soft_warnings.append(
-            f"Declared {number_of_children} dependent child(ren) but only {roster_dependents} "
-            f"child/dependent row(s) are listed in the family composition."
-        )
+    # #6 is now structurally impossible: the dependent count is DERIVED from
+    # the qualifying family-composition rows (derive_dependent_children), so it
+    # can no longer disagree with the roster.
 
     # #11 "a dependent is currently studying" but the only dependent is too
     # young to be enrolled (soft — older siblings may exist if >1 child)
@@ -316,12 +499,46 @@ def evaluate_submission_guards(data, *, solo_parent_status, civil_status, sex,
     except (TypeError, ValueError):
         youngest_int = None
     if (dependent_currently_studying and number_of_children == 1
-            and youngest_int is not None and youngest_int < 3):
+            and youngest_int is not None and 0 <= youngest_int < 3):
         soft_warnings.append(
             "Marked a dependent as currently studying, but the only dependent is under 3 years old."
         )
 
+    # Family-composition row consistency (age vs civil status / education /
+    # relationship-to-applicant)
+    hard_errors.extend(validate_family_members(family_members, applicant_age=age))
+
+    # Suggestion #4: duplicate family members (same name listed twice).
+    seen = {}
+    for m in family_members:
+        key = str(m.get('name', '')).strip().lower()
+        if not key:
+            continue
+        seen[key] = seen.get(key, 0) + 1
+    for name_key, n in seen.items():
+        if n > 1:
+            hard_errors.append(f'"{name_key.title()}" is listed {n} times in the family composition; remove the duplicate.')
+
+    # Suggestion #5: contact number must be a valid PH mobile number.
+    contact_error = validate_ph_contact(data.get('contact_no', ''))
+    if contact_error:
+        hard_errors.append(contact_error)
+
     return hard_errors, soft_warnings
+
+
+def validate_ph_contact(contact_no):
+    """Validate a Philippine mobile number. Accepts 11 digits starting 09
+    (09XXXXXXXXX) or the +63 form (639XXXXXXXXX). Returns an error string, or
+    None if valid/blank."""
+    digits = ''.join(ch for ch in str(contact_no or '') if ch.isdigit())
+    if not digits:
+        return None  # emptiness is handled by the required-field check
+    if digits.startswith('63'):
+        digits = '0' + digits[2:]  # normalize +63 / 63 prefix to 0
+    if len(digits) == 11 and digits.startswith('09'):
+        return None
+    return "Contact number must be a valid Philippine mobile number (e.g. 09XXXXXXXXX)."
 
 
 def format_civil_status(value):
@@ -393,6 +610,7 @@ def parse_family_members(form_data):
                 'civil_status': form_data.get(f'family_civil_status_{index}', ''),
                 'education': form_data.get(f'family_educ_{index}', ''),
                 'occupation': form_data.get(f'family_occupation_{index}', ''),
+                'pwd': form_data.get(f'family_pwd_{index}', 'No'),
                 'income': income
             })
 
@@ -629,12 +847,6 @@ def assess_eligibility(data):
 
     solo_parent_status = data.get('solo_parent_status', '').strip().lower()
     status_specific_answer = data.get('category_duration_answer', '').strip()
-
-    try:
-        number_of_children = int(data.get('number_of_dependent_children', 0))
-    except:
-        number_of_children = 0
-
     solo_parent_reason = data.get('solo_parent_reason', '').strip()
 
     # Calculate applicant age
@@ -642,6 +854,30 @@ def assess_eligibility(data):
 
     # Parse family members
     family_members = parse_family_members(data)
+
+    # The dependent-children count and the youngest dependent's age are DERIVED
+    # authoritatively from the family composition — only household members who
+    # genuinely qualify as dependent children (a Child/Dependent who is
+    # unmarried and within the dependent age cap) count. A grown or married
+    # "Child" row does not. The posted number_of_dependent_children /
+    # youngest_child_age fields (read-only, auto-filled client-side) are not
+    # trusted here.
+    is_pregnancy = solo_parent_status == 'pregnant_woman_unborn_child'
+    applicant_with_pwd = data.get('with_pwd', 'No') == 'Yes'
+    dep_info = derive_dependent_children(
+        family_members, is_pregnancy=is_pregnancy, applicant_with_pwd=applicant_with_pwd)
+    number_of_children = dep_info['count']
+    youngest_child_age = dep_info['youngest']
+    # The engine's PWD flag (priority scoring + the over-22 dependent
+    # exception) is true if the applicant OR any counted dependent is a PWD.
+    with_pwd = applicant_with_pwd or dep_info['any_pwd']
+    # Sec. 9 scholarship: only if the applicant declared a dependent is
+    # currently studying AND that qualifying dependent's education level is
+    # High School or College (see SCHOLARSHIP_ELIGIBLE_EDUCATION_LEVELS).
+    dependent_currently_studying = (
+        (data.get('dependent_currently_studying', 'No') == 'Yes')
+        and dep_info['school_level_ok']
+    )
 
     # #12: Total family income is recomputed authoritatively from the family
     # composition rows here, rather than trusting the (read-only, but still
@@ -697,12 +933,34 @@ def assess_eligibility(data):
                                                   status_specific_answer=status_specific_answer,
                                                   number_of_children=number_of_children,
                                                   monthly_income=monthly_income,
-                                                  age=age)
+                                                  age=age,
+                                                  youngest_child_age=youngest_child_age,
+                                                  with_pwd=with_pwd,
+                                                  dependent_currently_studying=dependent_currently_studying)
     engine_result = rule_engine_evaluate(rule_applicant)
 
     result['eligible'] = engine_result['eligibility'] == 'Eligible'
     result['remarks'] = engine_result['remarks']
     result['priority_level'] = engine_result['priority_level']
+
+    # If the engine rejected this applicant specifically for having no
+    # qualifying dependent, AND that's because their only "Dependent" row(s)
+    # are employed, make the reason explicit rather than the engine's generic
+    # remark — RA 11861's dependent definition requires "unemployed" with no
+    # exception, so an employed dependent does not count for benefit-availing
+    # purposes. Guarded on the engine's own remark so this doesn't
+    # misattribute an unrelated rejection reason (e.g. duration too short)
+    # to employment just because an employed row also happens to be present.
+    if (not result['eligible'] and number_of_children == 0
+            and 'No qualifying dependent' in engine_result.get('remarks', '')
+            and dep_info['excluded_employed']):
+        names = ', '.join(dep_info['excluded_employed'])
+        result['remarks'] = (
+            f"No qualifying dependent: {names} is employed. Under RA 11861, a dependent must "
+            f"be unmarried, UNEMPLOYED, and 22 years old or below (or older only if unable to "
+            f"care for themselves due to disability) to count as a dependent for purposes of "
+            f"availing benefits under this Act; an employed child does not qualify."
+        )
     # The old borderline-income "pending verification" tier doesn't exist
     # in rules.json's model (each benefit is a clean granted/not-granted
     # boolean); needs_verification is now only set by the ML-conflict and
@@ -722,7 +980,7 @@ def assess_eligibility(data):
         civil_status=civil_status,
         sex=sex,
         monthly_income=monthly_income,
-        youngest_child_age_raw=data.get('youngest_child_age', ''),
+        youngest_child_age_raw=('' if youngest_child_age is None else str(youngest_child_age)),
         duration_months=rule_duration_months,
         number_of_children=number_of_children,
         age=age,
@@ -750,16 +1008,41 @@ def assess_eligibility(data):
                     'description': BENEFIT_DESCRIPTIONS.get(b['id'], f"RA 11861 {b['section']}")
                 })
 
+    # Informational notes for the applicant (not blockers). RA 11861's
+    # dependent definition requires UNEMPLOYED with no exception, so an
+    # employed "Dependent" row does not count at all (see
+    # derive_dependent_children). If the applicant is still eligible — i.e.
+    # they have at least one OTHER qualifying dependent besides the employed
+    # one(s) — explain why the employed member specifically wasn't counted,
+    # so the exclusion isn't silent.
+    result['dependent_notes'] = []
+    if result['eligible'] and dep_info['excluded_employed']:
+        names = ', '.join(dep_info['excluded_employed'])
+        result['dependent_notes'].append(
+            f"{names} was not counted as a dependent because they are employed. Under RA "
+            f"11861, a dependent must be unmarried, unemployed, and 22 years old or below "
+            f"(or older only if unable to care for themselves due to disability); an "
+            f"employed household member does not qualify, even if you support them. This "
+            f"did not affect your eligibility because you have at least one other "
+            f"qualifying dependent."
+        )
+
     return result
 
 
 def build_rule_engine_applicant(data, *, occupation, solo_parent_status,
                                  status_specific_answer, number_of_children,
-                                 monthly_income, age=None):
+                                 monthly_income, age=None, youngest_child_age=None,
+                                 with_pwd=None, dependent_currently_studying=None):
     """Translates this form's raw field names/values into the Applicant
     shape engine.evaluate() expects. Pure field-name translation only — no
     eligibility thresholds or category lists belong here; those live in
-    rules.json."""
+    rules.json. number_of_children and youngest_child_age are the values
+    DERIVED from the family composition (see derive_dependent_children), not
+    the raw posted fields. dependent_currently_studying, if provided, is
+    likewise the derived value (self-declared answer AND a qualifying
+    dependent's education level is High School or College — see
+    SCHOLARSHIP_ELIGIBLE_EDUCATION_LEVELS)."""
     try:
         duration_months = int(status_specific_answer)
     except (TypeError, ValueError):
@@ -769,11 +1052,8 @@ def build_rule_engine_applicant(data, *, occupation, solo_parent_status,
         # default rather than a sentinel failure value.
         duration_months = 0
 
-    youngest_child_age_raw = data.get('youngest_child_age', '').strip()
-    try:
-        youngest_child_age = int(youngest_child_age_raw)
-    except (TypeError, ValueError):
-        youngest_child_age = None
+    if dependent_currently_studying is None:
+        dependent_currently_studying = (data.get('dependent_currently_studying', 'No') == 'Yes')
 
     return RuleApplicant(
         type_of_solo_parent=TYPE_OF_SOLO_PARENT_MAP.get(solo_parent_status),
@@ -782,11 +1062,11 @@ def build_rule_engine_applicant(data, *, occupation, solo_parent_status,
         number_of_dependents=number_of_children,
         monthly_income=monthly_income,
         employment_status=infer_employment_status(occupation),
-        with_pwd=(data.get('with_pwd', 'No') == 'Yes'),
+        with_pwd=((data.get('with_pwd', 'No') == 'Yes') if with_pwd is None else with_pwd),
         youngest_child_age=youngest_child_age,
         receiving_other_govt_cash_aid=(data.get('receiving_other_govt_cash_aid', 'No') == 'Yes'),
         formal_philhealth_member=(data.get('formal_philhealth_member', 'No') == 'Yes'),
-        dependent_currently_studying=(data.get('dependent_currently_studying', 'No') == 'Yes'),
+        dependent_currently_studying=dependent_currently_studying,
         age=age,
     )
 
@@ -824,10 +1104,13 @@ def submit_assessment():
     # #12: recomputed from the family rows, not trusted from the posted total.
     total_family_income = sum(float(m.get('income', 0) or 0) for m in family_members)
 
-    try:
-        number_of_children = int(form_data.get('number_of_dependent_children', 0))
-    except:
-        number_of_children = 0
+    # Dependent-children count derived authoritatively from the qualifying
+    # family-composition rows (see derive_dependent_children) — for display
+    # consistency with assess_eligibility.
+    _is_pregnancy = form_data.get('solo_parent_status', '').strip().lower() == 'pregnant_woman_unborn_child'
+    _with_pwd = form_data.get('with_pwd', 'No') == 'Yes'
+    number_of_children = derive_dependent_children(
+        family_members, is_pregnancy=_is_pregnancy, applicant_with_pwd=_with_pwd)['count']
 
     first_name = form_data.get('first_name', '').strip()
     middle_name = form_data.get('middle_name', '').strip()
@@ -894,6 +1177,7 @@ def submit_assessment():
     result['priority_level'] = rule_result.get('priority_level')
     result['guard_errors'] = rule_result.get('guard_errors', [])
     result['guard_warnings'] = rule_result.get('guard_warnings', [])
+    result['dependent_notes'] = rule_result.get('dependent_notes', [])
 
     # Soft integrity warnings (roster mismatch, etc.) don't block eligibility
     # but flag an eligible case for MSWDO/DSWD verification.
@@ -955,14 +1239,35 @@ def submit_assessment():
 
 
 def generate_pdf(result):
-    """Generate PDF in Solo Parent Application Form style"""
+    """Generate PDF in Solo Parent Application Form style.
+
+    The form is laid out in an 11x17 "design" coordinate space (DESIGN_PAGE)
+    and rendered onto Legal-size paper (8.5x14) by applying a single uniform
+    fit-to-width scale. This keeps every existing coordinate intact while the
+    whole document shrinks proportionally to fit Legal without distortion.
+    Scaling down to ~77% also gains vertical room, so the content fits on one
+    Legal page with margin to spare.
+    """
     buffer = BytesIO()
 
-    # Tabloid Paper: 11 inches wide x 17 inches long
-    TABLOID_PAPER = (11 * inch, 17 * inch)
+    # Output paper: Philippine "Legal"/long bond, 8.5in x 14in.
+    LEGAL_PAPER = (8.5 * inch, 14 * inch)
+    # Original design canvas the coordinates below were built for (11x17).
+    DESIGN_PAGE = (11 * inch, 17 * inch)
+    # Uniform scale that fits the design width into the Legal width.
+    FIT_SCALE = LEGAL_PAPER[0] / DESIGN_PAGE[0]
 
-    c = canvas.Canvas(buffer, pagesize=TABLOID_PAPER)
-    width, height = TABLOID_PAPER
+    c = canvas.Canvas(buffer, pagesize=LEGAL_PAPER)
+    c.scale(FIT_SCALE, FIT_SCALE)
+    # All drawing below uses design (11x17) coordinates; the scale maps them
+    # onto the Legal sheet.
+    width, height = DESIGN_PAGE
+
+    def new_page():
+        """Start a new page and re-apply the fit scale (showPage resets the
+        transform)."""
+        c.showPage()
+        c.scale(FIT_SCALE, FIT_SCALE)
 
     app_info = result.get('applicant_info', {})
     family_members = result.get('family_members', [])
@@ -1274,7 +1579,7 @@ def generate_pdf(result):
 
     # Page Break Check
     if y < 150:
-        c.showPage()
+        new_page()
         y = height - 50
 
     c.setFont("Times-Bold", 10)
@@ -1297,7 +1602,7 @@ def generate_pdf(result):
     # ---------- Consent paragraph ----------
     # Page Break Check
     if y < 200:
-        c.showPage()
+        new_page()
         y = height - 40
 
     consent_y = y - 88
@@ -1353,7 +1658,7 @@ def generate_pdf(result):
 
     # Page Break Check for Section V
     if y < 320:
-        c.showPage()
+        new_page()
         y = height - 50
 
     c.setFont("Times-Bold", 11)

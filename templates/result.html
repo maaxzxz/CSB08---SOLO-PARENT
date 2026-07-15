@@ -103,6 +103,14 @@
                     </div>
                     {% endif %}
 
+                    {% if result.dependent_notes %}
+                    {% for note in result.dependent_notes %}
+                    <div class="alert alert-info mx-auto mb-4" style="max-width: 650px;">
+                        <i class="fas fa-info-circle"></i> <strong>Key Point:</strong> {{ note }}
+                    </div>
+                    {% endfor %}
+                    {% endif %}
+
                     {% elif result.needs_verification %}
                     <div class="status-card text-center mb-4">
                         <div class="result-icon">
