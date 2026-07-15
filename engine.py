@@ -102,6 +102,7 @@ def evaluate(applicant: Applicant) -> dict:
 
     thresholds = RULES["thresholds"]
     min_age = thresholds.get("min_applicant_age")
+    max_age = thresholds.get("max_applicant_age")
     max_dependent_age = thresholds.get("max_dependent_age")
 
     # --- eligibility ---
@@ -112,6 +113,10 @@ def evaluate(applicant: Applicant) -> dict:
         eligibility = "Not Eligible"
         remarks = (f"Applicant is {applicant.age} year(s) old; RA 11861 solo-parent "
                    f"benefits require the applicant to be at least {min_age}.")
+    elif max_age is not None and applicant.age is not None and applicant.age > max_age:
+        eligibility = "Not Eligible"
+        remarks = (f"Applicant age {applicant.age} exceeds {max_age}; the recorded "
+                   f"birthdate appears to be a data-entry error.")
     elif cat["is_pregnancy_category"]:
         if applicant.is_pregnant:
             eligibility, remarks = "Eligible", ""

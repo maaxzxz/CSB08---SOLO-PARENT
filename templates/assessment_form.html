@@ -13,7 +13,10 @@
                     <h3 class="card-title mb-2">SOLO PARENT APPLICATION FORM</h3>
                     <p class="text-muted mb-4">Complete this form below. All data is processed locally and securely.</p>
 
-                    <form method="POST" action="/submit-assessment" id="applicationForm">
+                    {# novalidate: submission checks run in our own handler so ALL
+                       missing fields get highlighted at once with a clickable
+                       summary, instead of the browser's one-bubble-at-a-time. #}
+                    <form method="POST" action="/submit-assessment" id="applicationForm" novalidate>
                         <!-- SECTION I: IDENTIFYING INFORMATION -->
                         <div class="form-section mb-5">
                             <h5 class="section-title">I. IDENTIFYING INFORMATION</h5>
@@ -481,6 +484,13 @@
             if (e.target.name && e.target.name.startsWith('family_income_')) {
                 recalculateTotalFamilyIncome();
             }
+            // Occupation/income decide whether a row still qualifies as a
+            // dependent (an employed/earning member is excluded), so re-sync
+            // the derived count when either changes.
+            if (e.target.name && (e.target.name.startsWith('family_income_')
+                    || e.target.name.startsWith('family_occupation_'))) {
+                syncDependentFieldsFromRoster();
+            }
         });
         // Relationship / civil status are <select> -> fire 'change', not
         // 'input'. Re-sync the dependent count/youngest-age when either
@@ -493,19 +503,165 @@
             }
         });
 
-        // The PWD answer relaxes the dependent age cap, so re-sync on change.
-        document.querySelectorAll('input[name="with_pwd"]').forEach(function(radio) {
-            radio.addEventListener('change', syncDependentFieldsFromRoster);
+        const applicationForm = document.getElementById('applicationForm');
+        applicationForm.addEventListener('submit', function(e) {
+            clearValidationState(applicationForm);
+            const missing = collectMissingRequired(applicationForm);
+            const problems = validateApplicant().concat(validateFamilyRows());
+            if (!missing.length && !problems.length) {
+                return; // all good — let the form submit
+            }
+            e.preventDefault();
+            renderValidationSummary(applicationForm, missing, problems);
         });
 
-        document.getElementById('applicationForm').addEventListener('submit', function(e) {
-            const problems = validateApplicant().concat(validateFamilyRows());
-            if (problems.length) {
-                e.preventDefault();
-                alert('Please correct the following before submitting:\n\n- ' + problems.join('\n- '));
-            }
+        // Live cleanup: the moment a highlighted field is filled in, drop its
+        // red highlight so the marks always show only what's still missing.
+        ['input', 'change'].forEach(function(evt) {
+            applicationForm.addEventListener(evt, function(e) {
+                const el = e.target;
+                if (!el.name) return;
+                if (el.type === 'radio') {
+                    document.querySelectorAll('input[name="' + el.name + '"]').forEach(function(r) {
+                        r.classList.remove('is-invalid');
+                    });
+                    const group = radioGroupContainer(el);
+                    if (group) {
+                        const msg = group.querySelector('.radio-required-msg');
+                        if (msg) msg.remove();
+                    }
+                } else if (el.checkValidity && el.checkValidity()) {
+                    el.classList.remove('is-invalid');
+                }
+            });
         });
     });
+
+    // ---- Required-field highlighting -------------------------------------
+    // On submit, every missing/invalid required field is highlighted in red
+    // where it sits, gets an inline message, and is listed in a clickable
+    // summary box at the top of the form; the page then scrolls straight to
+    // the first problem field instead of just jumping to the top.
+
+    function cleanLabelText(text) {
+        return (text || '').replace(/\s*\*\s*$/, '').trim();
+    }
+
+    function radioGroupContainer(radio) {
+        return radio.closest('.mb-3, [class*="col-md"]');
+    }
+
+    function fieldLabelFor(el) {
+        // Family-table inputs: name them by row number + column header.
+        const cell = el.closest('td');
+        if (cell) {
+            const row = el.closest('tr');
+            const rowNo = Array.prototype.indexOf.call(row.parentNode.children, row) + 1;
+            const colNo = Array.prototype.indexOf.call(row.children, cell);
+            const header = document.querySelector('#familyTable thead th:nth-child(' + (colNo + 1) + ')');
+            return 'Family member ' + rowNo + ': ' + (header ? header.textContent.trim() : 'field');
+        }
+        if (el.type === 'radio') {
+            const wrap = radioGroupContainer(el);
+            const lbl = wrap && wrap.querySelector('.form-label');
+            if (lbl) return cleanLabelText(lbl.textContent);
+        }
+        if (el.id) {
+            const lbl = document.querySelector('label[for="' + el.id + '"]');
+            if (lbl) return cleanLabelText(lbl.textContent);
+        }
+        return el.name || 'A required field';
+    }
+
+    function collectMissingRequired(form) {
+        const items = [];
+        const seenRadioGroups = {};
+        Array.prototype.forEach.call(form.elements, function(el) {
+            if (!el.willValidate || el.checkValidity()) return;
+            if (el.type === 'radio') {
+                if (seenRadioGroups[el.name]) return; // one entry per radio group
+                seenRadioGroups[el.name] = true;
+            }
+            items.push({ el: el, label: fieldLabelFor(el) });
+            markInvalid(el);
+        });
+        return items;
+    }
+
+    function markInvalid(el) {
+        if (el.type === 'radio') {
+            document.querySelectorAll('input[name="' + el.name + '"]').forEach(function(r) {
+                r.classList.add('is-invalid');
+            });
+            const group = radioGroupContainer(el);
+            if (group && !group.querySelector('.radio-required-msg')) {
+                const msg = document.createElement('div');
+                msg.className = 'text-danger small mt-1 radio-required-msg';
+                msg.innerHTML = '<i class="fas fa-exclamation-circle"></i> Please select an option.';
+                group.appendChild(msg);
+            }
+        } else {
+            el.classList.add('is-invalid');
+            if (!el.parentElement.querySelector('.invalid-feedback')) {
+                const msg = document.createElement('div');
+                msg.className = 'invalid-feedback';
+                msg.textContent = el.validationMessage || 'This field is required.';
+                el.parentElement.appendChild(msg);
+            }
+        }
+    }
+
+    function clearValidationState(form) {
+        form.querySelectorAll('.is-invalid').forEach(function(el) { el.classList.remove('is-invalid'); });
+        form.querySelectorAll('.radio-required-msg, .invalid-feedback').forEach(function(el) { el.remove(); });
+        const summary = document.getElementById('validationSummary');
+        if (summary) summary.remove();
+    }
+
+    function renderValidationSummary(form, missing, problems) {
+        const box = document.createElement('div');
+        box.id = 'validationSummary';
+        box.className = 'alert alert-danger';
+        let html = '<strong><i class="fas fa-exclamation-triangle"></i> Please fix the following before submitting'
+            + (missing.length ? ' (highlighted in red below — click an item to jump to it):' : ':')
+            + '</strong><ul class="mb-0 mt-2">';
+        missing.forEach(function(item, i) {
+            html += '<li><a href="#" class="alert-link" data-missing-index="' + i + '">'
+                + escapeHtml(item.label) + '</a></li>';
+        });
+        problems.forEach(function(p) {
+            html += '<li>' + escapeHtml(p) + '</li>';
+        });
+        html += '</ul>';
+        box.innerHTML = html;
+        form.insertBefore(box, form.firstChild);
+
+        box.querySelectorAll('[data-missing-index]').forEach(function(link) {
+            link.addEventListener('click', function(ev) {
+                ev.preventDefault();
+                focusField(missing[parseInt(this.dataset.missingIndex, 10)].el);
+            });
+        });
+
+        // Take the user straight to the first problem field.
+        if (missing.length) {
+            focusField(missing[0].el);
+        } else {
+            box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+    }
+
+    function focusField(el) {
+        const target = el.type === 'radio' ? (radioGroupContainer(el) || el) : el;
+        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        try { el.focus({ preventScroll: true }); } catch (err) { /* older browsers */ }
+    }
+
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
 
     function computeAgeFromDate(dateStr) {
         if (!dateStr) return null;
@@ -571,9 +727,12 @@
             const civilEl = row.querySelector('select[name^="family_civil_status_"]');
             const educEl = row.querySelector('select[name^="family_educ_"]');
             const relEl = row.querySelector('select[name^="family_relationship_"]');
+            const bdayEl = row.querySelector('input[name^="family_birthday_"]');
             const rawName = nameEl && nameEl.value.trim();
             if (rawName) {
-                const key = rawName.toLowerCase();
+                // Duplicate = same name AND same birthday (a father and son
+                // sharing a name are legitimate) — mirrors the server check.
+                const key = rawName.toLowerCase() + '|' + (bdayEl ? bdayEl.value : '');
                 nameCounts[key] = (nameCounts[key] || 0) + 1;
             }
             const name = rawName || 'A family member';
@@ -602,8 +761,8 @@
         // Suggestion #4: duplicate family members.
         Object.keys(nameCounts).forEach(function(key) {
             if (nameCounts[key] > 1) {
-                problems.push('"' + toTitleCase(key) + '" is listed ' + nameCounts[key] +
-                    ' times in the family composition — remove the duplicate.');
+                problems.push('"' + toTitleCase(key.split('|')[0]) + '" is listed ' + nameCounts[key] +
+                    ' times in the family composition with the same birthday — remove the duplicate.');
             }
         });
         return problems;
@@ -777,19 +936,41 @@
     // Dependent Child" (both read-only) from the family composition. Mirrors
     // the server's derive_dependent_children(): a household member counts ONLY
     // if their relationship is "Dependent" (a "Child" row is filiation info,
-    // never counted), they are unmarried, and they are within the dependent
-    // age cap (<= 22, or over it only if that member is a PWD, or the
-    // applicant declared a PWD). Employment does NOT remove a dependent.
+    // never counted), they are unmarried, UNEMPLOYED (no declared income),
+    // and within the dependent age cap (<= 22, or over it only if that
+    // member — the dependent themselves, not the applicant — is a PWD).
     // Pregnancy category: the unborn child (age -1) is the youngest and is
     // included in the count.
     const MAX_DEPENDENT_AGE = 22;
+
+    // Occupation values that mean "not employed" — mirrors the server's
+    // NO_OCCUPATION_SYNONYMS + _EXTRA_NOT_EMPLOYED_OCCUPATIONS (app.py);
+    // keep the lists in sync.
+    const NOT_EMPLOYED_OCCUPATIONS = [
+        'unemployed', 'none', 'n/a', 'na', 'not applicable', 'nil', 'n a',
+        'wala', 'walang trabaho', 'walang hanapbuhay', 'no occupation',
+        'no work', 'no job', '-', '--', 'none.',
+        'student', 'studying', 'schooling', 'minor', 'baby', 'infant', 'toddler',
+        'child', 'kid', 'preschool', 'pre-school'
+    ];
+
+    // Mirrors app.py _member_is_employed(): a declared income > 0, or an
+    // occupation that isn't a "no occupation" synonym, makes the member
+    // employed/earning — and an employed member is NOT a dependent under
+    // RA 11861.
+    function memberRowIsEmployed(row) {
+        const incEl = row.querySelector('input[name^="family_income_"]');
+        if (incEl && Number(digitsOnly(incEl.value)) > 0) return true;
+        const occEl = row.querySelector('input[name^="family_occupation_"]');
+        const occ = occEl ? occEl.value.trim().toLowerCase().replace(/\.+$/, '') : '';
+        if (!occ) return false;
+        return NOT_EMPLOYED_OCCUPATIONS.indexOf(occ) === -1;
+    }
+
     function syncDependentFieldsFromRoster() {
         const numField = document.getElementById('number_of_dependent_children');
         const youngestField = document.getElementById('youngest_child_age');
         if (!numField || !youngestField) return;
-
-        const pwdEl = document.querySelector('input[name="with_pwd"]:checked');
-        const applicantPwd = pwdEl && pwdEl.value === 'Yes';
 
         const ages = [];
         document.querySelectorAll('#familyMembers tr').forEach(function(row) {
@@ -805,7 +986,8 @@
             const a = parseInt(ageEl.value, 10);
             if (isNaN(a) || a < 0) return;
             const memberPwd = pwdRowEl && pwdRowEl.value === 'Yes';
-            if (a > MAX_DEPENDENT_AGE && !memberPwd && !applicantPwd) return;  // within dependent age range
+            if (a > MAX_DEPENDENT_AGE && !memberPwd) return;             // over 22 only if the member is a PWD
+            if (memberRowIsEmployed(row)) return;                        // must be unemployed
             ages.push(a);
         });
 

@@ -1,5 +1,6 @@
 import sys
 import os
+from datetime import date
 
 from app import app, assess_eligibility
 
@@ -17,6 +18,39 @@ def with_engine_fields(data, youngest_child_age='5'):
     data.setdefault('formal_philhealth_member', 'No')
     data.setdefault('dependent_currently_studying', 'No')
     return data
+
+
+def birthday_for_age(age):
+    """A birthday exactly `age` years + 6 months before today, so the age
+    derived from it server-side equals `age` regardless of when the tests
+    run (family rows are validated for birthday/age consistency)."""
+    today = date.today()
+    year, month = today.year - age, today.month - 6
+    if month <= 0:
+        year, month = year - 1, month + 12
+    return date(year, month, min(today.day, 28)).isoformat()
+
+
+def dependent_rows(*children):
+    """Builds family-composition form fields for dependent children. The
+    dependent count and youngest age are DERIVED from these rows server-side
+    (derive_dependent_children) — posted counts are not trusted — so every
+    case that expects eligibility must list its dependents here.
+    Each child is (name, age, education)."""
+    fields = {}
+    for i, (name, age, education) in enumerate(children):
+        fields.update({
+            f'family_name_{i}': name,
+            f'family_relationship_{i}': 'Dependent',
+            f'family_birthday_{i}': birthday_for_age(age),
+            f'family_age_{i}': str(age),
+            f'family_civil_status_{i}': 'Single',
+            f'family_educ_{i}': education,
+            f'family_occupation_{i}': 'Student' if age >= 5 else 'None',
+            f'family_pwd_{i}': 'No',
+            f'family_income_{i}': '0',
+        })
+    return fields
 
 
 def run_test_cases():
@@ -39,7 +73,8 @@ def run_test_cases():
         'total_family_income': '1508',
         'solo_parent_status': 'single_parent_unmarried',
         'number_of_dependent_children': '2',
-        'with_pwd': 'No'
+        'with_pwd': 'No',
+        **dependent_rows(('Ana Reyes', 5, 'Pre-school'), ('Ben Reyes', 8, 'Elementary'))
     })
 
     # Test Case 2: Borderline Income Solo Parent (between the minimum-wage
@@ -62,7 +97,8 @@ def run_test_cases():
         'solo_parent_status': 'separated_divorced',
         'category_duration_answer': '12',
         'number_of_dependent_children': '2',
-        'with_pwd': 'No'
+        'with_pwd': 'No',
+        **dependent_rows(('Jose Santos', 3, ''), ('Nina Santos', 10, 'Elementary'))
     })
 
     # Test Case 3: High-Income Solo Parent
@@ -81,7 +117,8 @@ def run_test_cases():
         'solo_parent_status': 'separated_divorced',
         'category_duration_answer': '12',
         'number_of_dependent_children': '2',
-        'with_pwd': 'No'
+        'with_pwd': 'No',
+        **dependent_rows(('Marco Villanueva', 8, 'Elementary'), ('Lea Villanueva', 12, 'High School'))
     })
 
     # Test Case 4: Non-Eligible Parent (zero dependents)

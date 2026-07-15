@@ -5,15 +5,30 @@ from reportlab.lib import colors
 from reportlab.pdfgen import canvas
 from reportlab.pdfbase.pdfmetrics import stringWidth
 from io import BytesIO
+import hashlib
+import hmac
 import json
 import os
+import re
 import textwrap
 import joblib
 import pandas as pd
 from engine import Applicant as RuleApplicant, evaluate as rule_engine_evaluate, RULES as ENGINE_RULES
 
 app = Flask(__name__)
-app.secret_key = 'solo-parent-dss-key'
+# Also used to HMAC-sign the assessment payload embedded in result.html (see
+# _sign_result_payload / download_pdf). Set SECRET_KEY in the environment for
+# any real deployment — the fallback is a development-only value.
+app.secret_key = os.environ.get('SECRET_KEY', 'solo-parent-dss-key')
+
+
+def _sign_result_payload(payload: str) -> str:
+    """HMAC-SHA256 signature over the result JSON that submit_assessment()
+    embeds in result.html. /download-pdf only renders a payload whose
+    signature verifies — without this, anyone could POST arbitrary JSON and
+    mint an official-looking "ELIGIBLE" assessment PDF."""
+    return hmac.new(app.secret_key.encode('utf-8'),
+                    payload.encode('utf-8'), hashlib.sha256).hexdigest()
 
 # Load ML Model and Encoders at startup using absolute paths relative to script location
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -200,6 +215,7 @@ REQUIRED_SUBMISSION_FIELDS = [
     ('sex', 'Sex'),
     ('civil_status', 'Civil status'),
     ('monthly_income', 'Monthly income'),
+    ('contact_no', 'Contact number'),
     ('solo_parent_status', 'Reason for being a solo parent'),
     ('with_pwd', 'PWD registration answer'),
     ('receiving_other_govt_cash_aid', 'Other government cash aid answer'),
@@ -231,6 +247,14 @@ CIVIL_STATUS_ALLOWED_REASONS = {
     'divorced':  {'annulled_nullified_marriage'} | _CIVIL_STATUS_NEUTRAL_REASONS,
     'widowed':   {'widowed'} | _CIVIL_STATUS_NEUTRAL_REASONS,
 }
+
+# Enum whitelists. The consistency guards above are keyed on these values, so
+# an unrecognized value must FAIL validation rather than silently skip the
+# checks keyed on it (e.g. civil_status="widow" previously bypassed the whole
+# civil-status/reason matrix, and sex="m" slipped past the male+pregnancy
+# guard). Valid reasons are TYPE_OF_SOLO_PARENT_MAP's keys; valid civil
+# statuses are CIVIL_STATUS_ALLOWED_REASONS's keys.
+VALID_SEX_VALUES = {'male', 'female'}
 
 # Absolute ceiling on a claimed circumstance duration, independent of age
 # (#8). 100 years in months — anything beyond is a data-entry error.
@@ -274,6 +298,16 @@ _EXTRA_NOT_EMPLOYED_OCCUPATIONS = {
 
 
 def _member_is_employed(member):
+    # A declared income makes the member employed/earning regardless of what
+    # the occupation text says — otherwise a "Dependent" with ₱30,000/month
+    # income and a blank occupation would still count as an unemployed
+    # dependent, sidestepping RA 11861's UNEMPLOYED requirement while the
+    # form openly holds the contradicting evidence.
+    try:
+        if float(member.get('income') or 0) > 0:
+            return True
+    except (TypeError, ValueError):
+        pass
     occ = str(member.get('occupation', '')).strip().lower().strip('.')
     if not occ or occ in NO_OCCUPATION_SYNONYMS or occ in _EXTRA_NOT_EMPLOYED_OCCUPATIONS:
         return False
@@ -292,7 +326,7 @@ def _member_is_pwd(member):
 SCHOLARSHIP_ELIGIBLE_EDUCATION_LEVELS = {'high school', 'college'}
 
 
-def derive_dependent_children(family_members, is_pregnancy=False, applicant_with_pwd=False):
+def derive_dependent_children(family_members, is_pregnancy=False):
     """Work out the dependent-child figures from the family composition, per
     RA 11861's statutory definition of "children or dependents":
 
@@ -315,7 +349,8 @@ def derive_dependent_children(family_members, is_pregnancy=False, applicant_with
     Returns a dict:
       count             -> Number of Dependent Children (incl. the unborn for pregnancy)
       youngest          -> Age of Youngest Dependent Child (-1 for an unborn)
-      excluded_employed -> names of "Dependent" rows disqualified for being employed
+      excluded_employed -> names of "Dependent" rows disqualified for being
+                            employed (or for having a declared income)
       any_pwd           -> whether any counted dependent is a PWD
       school_level_ok   -> whether any counted dependent's education is High
                             School or College (gates the Sec. 9 scholarship)
@@ -337,8 +372,13 @@ def derive_dependent_children(family_members, is_pregnancy=False, applicant_with
         if age < 0:
             continue
         member_pwd = _member_is_pwd(m)
-        if age > max_dependent_age and not (member_pwd or applicant_with_pwd):
-            continue  # over the age cap and not a PWD -> not a dependent
+        if age > max_dependent_age and not member_pwd:
+            # RA 11861's over-22 exception is for a dependent unable to care
+            # for THEMSELVES due to disability — it must be the DEPENDENT
+            # who is a PWD. The applicant's own PWD status raises priority
+            # scoring but cannot make an able-bodied over-22 member a
+            # qualifying dependent.
+            continue
         if _member_is_employed(m):
             # RA 11861's dependent definition requires UNEMPLOYED with no
             # exception — an employed member is not a dependent under this
@@ -384,6 +424,25 @@ def validate_family_members(family_members, applicant_age=None):
         if age < 0:
             errors.append(f"{name}: age cannot be negative.")
             continue
+
+        # The form derives each row's age from its birthday client-side, so
+        # the two can only disagree via a tampered/scripted POST or a stale
+        # value — reconcile them here. ±1 year of slack covers a birthday
+        # passing between page load and submission.
+        birthday_text = str(m.get('birthday', '')).strip()
+        if birthday_text:
+            try:
+                born = datetime.strptime(birthday_text, '%Y-%m-%d')
+            except ValueError:
+                born = None
+            if born is not None:
+                today = datetime.today()
+                derived_age = today.year - born.year - ((today.month, today.day) < (born.month, born.day))
+                if derived_age >= 0 and abs(derived_age - age) > 1:
+                    errors.append(
+                        f"{name}: age {age} does not match their birthday "
+                        f"({birthday_text} makes them about {derived_age})."
+                    )
 
         civil = str(m.get('civil_status', '')).strip().lower()
         relationship = str(m.get('relationship', '')).strip().lower()
@@ -456,10 +515,52 @@ def evaluate_submission_guards(data, *, solo_parent_status, civil_status, sex,
         if not str(data.get(field_name, '')).strip():
             hard_errors.append(f"Missing required field: {label}.")
 
+    # Enum whitelists: an unrecognized sex/civil-status/reason value must
+    # fail outright — previously it silently BYPASSED every consistency
+    # check keyed on it (e.g. civil_status="widow" skipped the whole
+    # civil-status/reason matrix, and sex="m" slipped past the pregnancy
+    # guard). Blank values are already reported by the required-field check.
+    sex_key = sex.strip().lower()
+    if sex_key and sex_key not in VALID_SEX_VALUES:
+        hard_errors.append(f'Unrecognized sex value "{sex}".')
+    civil_key = civil_status.strip().lower()
+    if civil_key and civil_key not in CIVIL_STATUS_ALLOWED_REASONS:
+        hard_errors.append(f'Unrecognized civil status "{civil_status}".')
+    if solo_parent_status and solo_parent_status not in TYPE_OF_SOLO_PARENT_MAP:
+        hard_errors.append(f'Unrecognized reason for being a solo parent "{solo_parent_status}".')
+
     # #7 income cannot be negative (rejecting, not clamping — clamping a
     # negative to 0 would wrongly unlock the lowest, most generous tier)
     if monthly_income < 0:
         hard_errors.append("Monthly income cannot be negative.")
+
+    # Non-numeric money text is rejected for the same reason negatives are:
+    # parse_money() maps it to 0.0, and ₱0 unlocks the most generous benefit
+    # tier — so "N/A" income would silently be treated as the most favorable
+    # possible answer.
+    if invalid_money_text(data.get('monthly_income')):
+        hard_errors.append("Monthly income must be a numeric amount (e.g. 15000).")
+    for key in data:
+        if key.startswith('family_income_') and invalid_money_text(data.get(key)):
+            hard_errors.append("Family member income must be a numeric amount.")
+            break
+
+    # Occupation vs. declared income consistency (soft — informal/irregular
+    # income and freshly-started jobs are legitimate, so these flag for
+    # MSWDO/DSWD verification rather than block). The inconsistent pair
+    # matters because benefits gate on the two fields separately: employment
+    # status gates Sec. 15(d), income gates 15(a)/(b)/(e).
+    employment_status = infer_employment_status(data.get('occupation', ''))
+    min_wage = ENGINE_RULES['thresholds'].get('min_wage_monthly', 16000)
+    if employment_status == 'Unemployed' and monthly_income > min_wage:
+        soft_warnings.append(
+            f"Occupation indicates unemployed, but declared monthly income is "
+            f"PHP {monthly_income:,.0f} (above the PHP {min_wage:,} minimum wage)."
+        )
+    elif employment_status in ('Employed', 'Self-Employed', 'Part-Time') and monthly_income == 0:
+        soft_warnings.append(
+            f"Occupation indicates {employment_status.lower()}, but declared monthly income is PHP 0."
+        )
 
     # #3 pregnancy category requires female applicant
     if solo_parent_status == 'pregnant_woman_unborn_child' and sex.strip().lower() == 'male':
@@ -508,16 +609,22 @@ def evaluate_submission_guards(data, *, solo_parent_status, civil_status, sex,
     # relationship-to-applicant)
     hard_errors.extend(validate_family_members(family_members, applicant_age=age))
 
-    # Suggestion #4: duplicate family members (same name listed twice).
+    # Suggestion #4 (revised): duplicate family members. The key is name AND
+    # birthday, not name alone — a father and son sharing a name (Sr./Jr.)
+    # are a legitimate household, not a duplicate.
     seen = {}
     for m in family_members:
-        key = str(m.get('name', '')).strip().lower()
-        if not key:
+        name_key = str(m.get('name', '')).strip().lower()
+        if not name_key:
             continue
+        key = (name_key, str(m.get('birthday', '')).strip())
         seen[key] = seen.get(key, 0) + 1
-    for name_key, n in seen.items():
+    for (name_key, _birthday), n in seen.items():
         if n > 1:
-            hard_errors.append(f'"{name_key.title()}" is listed {n} times in the family composition; remove the duplicate.')
+            hard_errors.append(
+                f'"{name_key.title()}" is listed {n} times in the family composition with the '
+                f'same birthday; remove the duplicate.'
+            )
 
     # Suggestion #5: contact number must be a valid PH mobile number.
     contact_error = validate_ph_contact(data.get('contact_no', ''))
@@ -584,6 +691,22 @@ def parse_money(value):
         return 0.0
 
 
+def invalid_money_text(value):
+    """True if the value is non-blank but not parseable as a number — the
+    case parse_money() silently maps to 0.0. Callers reject such input as a
+    hard error (see evaluate_submission_guards): treating "N/A" as ₱0 would
+    grant the lowest-income, most generous benefit tier. Blank stays valid
+    here; required-ness is the required-field check's job."""
+    text = str(value or '').replace(',', '').strip()
+    if not text:
+        return False
+    try:
+        float(text)
+        return False
+    except ValueError:
+        return True
+
+
 def parse_family_members(form_data):
     """Parse family members safely, even if rows are deleted"""
     family_members = []
@@ -628,6 +751,14 @@ NO_OCCUPATION_SYNONYMS = {
 }
 
 
+# Whole-word patterns only. The previous substring test (`word in occ`)
+# misclassified ordinary occupations — "Receptionist" and "Sculptor" contain
+# "pt" and became Part-Time (which grants the Sec. 15(d) livelihood benefit),
+# "Town Clerk" contains "own" and became Self-Employed.
+_SELF_EMPLOYED_RE = re.compile(r'\b(own|owner|self|business|freelance|freelancer|vendor)\b')
+_PART_TIME_RE = re.compile(r'\b(part[\s-]?time|pt)\b')
+
+
 def infer_employment_status(occupation_text):
     """Infer employment status from occupation text field"""
     if not occupation_text:
@@ -637,9 +768,9 @@ def infer_employment_status(occupation_text):
 
     if occ in NO_OCCUPATION_SYNONYMS or len(occ) == 0:
         return 'Unemployed'
-    elif any(word in occ for word in ['own', 'self', 'business', 'freelance', 'vendor']):
+    elif _SELF_EMPLOYED_RE.search(occ):
         return 'Self-Employed'
-    elif any(word in occ for word in ['part-time', 'pt', 'part time']):
+    elif _PART_TIME_RE.search(occ):
         return 'Part-Time'
     else:
         return 'Employed'
@@ -864,8 +995,7 @@ def assess_eligibility(data):
     # trusted here.
     is_pregnancy = solo_parent_status == 'pregnant_woman_unborn_child'
     applicant_with_pwd = data.get('with_pwd', 'No') == 'Yes'
-    dep_info = derive_dependent_children(
-        family_members, is_pregnancy=is_pregnancy, applicant_with_pwd=applicant_with_pwd)
+    dep_info = derive_dependent_children(family_members, is_pregnancy=is_pregnancy)
     number_of_children = dep_info['count']
     youngest_child_age = dep_info['youngest']
     # The engine's PWD flag (priority scoring + the over-22 dependent
@@ -956,7 +1086,7 @@ def assess_eligibility(data):
             and dep_info['excluded_employed']):
         names = ', '.join(dep_info['excluded_employed'])
         result['remarks'] = (
-            f"No qualifying dependent: {names} is employed. Under RA 11861, a dependent must "
+            f"No qualifying dependent: {names} is employed or has a declared income. Under RA 11861, a dependent must "
             f"be unmarried, UNEMPLOYED, and 22 years old or below (or older only if unable to "
             f"care for themselves due to disability) to count as a dependent for purposes of "
             f"availing benefits under this Act; an employed child does not qualify."
@@ -1019,7 +1149,7 @@ def assess_eligibility(data):
     if result['eligible'] and dep_info['excluded_employed']:
         names = ', '.join(dep_info['excluded_employed'])
         result['dependent_notes'].append(
-            f"{names} was not counted as a dependent because they are employed. Under RA "
+            f"{names} was not counted as a dependent because they are employed or have a declared income. Under RA "
             f"11861, a dependent must be unmarried, unemployed, and 22 years old or below "
             f"(or older only if unable to care for themselves due to disability); an "
             f"employed household member does not qualify, even if you support them. This "
@@ -1108,9 +1238,8 @@ def submit_assessment():
     # family-composition rows (see derive_dependent_children) — for display
     # consistency with assess_eligibility.
     _is_pregnancy = form_data.get('solo_parent_status', '').strip().lower() == 'pregnant_woman_unborn_child'
-    _with_pwd = form_data.get('with_pwd', 'No') == 'Yes'
     number_of_children = derive_dependent_children(
-        family_members, is_pregnancy=_is_pregnancy, applicant_with_pwd=_with_pwd)['count']
+        family_members, is_pregnancy=_is_pregnancy)['count']
 
     first_name = form_data.get('first_name', '').strip()
     middle_name = form_data.get('middle_name', '').strip()
@@ -1235,7 +1364,15 @@ def submit_assessment():
     # with client/. Nothing gets recomputed here.
     result['benefits'] = rule_result.get('benefits', [])
 
-    return render_template('result.html', result=result)
+    # The PDF-download form embeds this exact JSON string plus its HMAC
+    # signature; /download-pdf refuses any payload whose signature doesn't
+    # verify, so the client can't alter the assessment between the result
+    # page and the PDF.
+    result_json = json.dumps(result, sort_keys=True, separators=(',', ':'))
+    result_sig = _sign_result_payload(result_json)
+
+    return render_template('result.html', result=result,
+                           result_json=result_json, result_sig=result_sig)
 
 
 def generate_pdf(result):
@@ -1782,8 +1919,18 @@ def generate_pdf(result):
 
 @app.route('/download-pdf', methods=['POST'])
 def download_pdf():
-    """Generate and download PDF report"""
-    result_json = request.form.get('result_data', '{}')
+    """Generate and download PDF report.
+
+    Only accepts the result payload submit_assessment() signed and embedded
+    in result.html — without the HMAC check, anyone could POST arbitrary
+    JSON here and mint an official-looking "ELIGIBLE" assessment PDF with
+    any name, confidence, and benefit list."""
+    result_json = request.form.get('result_data', '')
+    signature = request.form.get('result_sig', '')
+    if not result_json or not hmac.compare_digest(
+            _sign_result_payload(result_json), signature):
+        return ("Invalid or missing assessment signature. Please download the PDF "
+                "from the assessment result page.", 403)
     result = json.loads(result_json)
 
     pdf_buffer = generate_pdf(result)
@@ -1796,6 +1943,36 @@ def download_pdf():
         as_attachment=True,
         download_name=filename
     )
+
+
+@app.route('/faq')
+def faq():
+    """Frequently Asked Questions page"""
+    return render_template('faq.html')
+
+
+@app.route('/contact')
+def contact():
+    """Contact MSWDO page"""
+    return render_template('contact.html')
+
+
+@app.route('/privacy')
+def privacy_policy():
+    """Privacy Policy page"""
+    return render_template('privacy_policy.html')
+
+
+@app.route('/report')
+def report():
+    """Report an Inquiry page"""
+    return render_template('report.html')
+
+
+@app.route('/ra11861')
+def ra11861():
+    """RA 11861 Compliance page"""
+    return render_template('ra11861.html')
 
 
 if __name__ == '__main__':

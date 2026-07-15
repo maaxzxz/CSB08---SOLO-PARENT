@@ -247,3 +247,84 @@ Correction" list; soft warnings render inside the verification notice.
 (#4) is a reasonable default that blocks clear contradictions while allowing
 guardianship/caregiver/pregnancy/OFW under any civil status. If your MSWDO wants a
 stricter or looser matrix, it's a single dict in `app.py` (mirror the JS copy).
+
+---
+
+# Round 2 — second loose-logic pass (all implemented)
+
+A follow-up review after the 13 items above were closed. Same method: gaps that slip
+through because nothing blocks them, each reproduced against the running code before
+fixing. **STATUS: ALL IMPLEMENTED + VERIFIED** (30-check verification suite passed;
+`eval_accuracy.py` still 100% / 0 mismatches on all 8 fields; `test_eligibility.py`
+fixtures updated to include family-composition rows — they predated the derived-count
+design and could never reach an eligible verdict; all GET routes 200; PDFs generate).
+
+## R2-1. `/download-pdf` trusted arbitrary client JSON — an official "ELIGIBLE" PDF could be forged *(HIGH)*
+Any direct POST with fabricated JSON produced an official-looking assessment PDF,
+bypassing every server-side guard at the document layer.
+**Fix:** `submit_assessment()` embeds the result as a canonical JSON string plus an
+HMAC-SHA256 signature (`_sign_result_payload`, keyed on `app.secret_key` — set
+`SECRET_KEY` in the environment for deployment). `/download-pdf` verifies with
+`hmac.compare_digest` and returns 403 for any altered/unsigned payload.
+
+## R2-2. Unparseable income text silently became ₱0 — the most generous tier *(HIGH)*
+`monthly_income = "N/A"` passed the required-field check and `parse_money()` mapped it
+to 0.0, unlocking Cash Subsidy + VAT + Housing at once (same failure class as round-1 #7,
+opposite direction). **Fix:** `invalid_money_text()`; non-blank non-numeric money text in
+`monthly_income` or any `family_income_*` is now a hard error.
+
+## R2-3. Substring occupation matching granted benefits to misspelled-in jobs *(HIGH)*
+"Receptionist"/"Sculptor" contain `pt` → classified Part-Time → granted the Sec. 15(d)
+livelihood benefit; "Town Clerk" contains `own` → Self-Employed.
+**Fix:** whole-word regexes (`_SELF_EMPLOYED_RE`, `_PART_TIME_RE`) in
+`infer_employment_status()`.
+
+## R2-4. The *applicant's* PWD status extended the *dependent's* over-22 age cap *(MEDIUM-HIGH)*
+A 40-year-old able-bodied "Dependent" counted because the applicant is a PWD. RA 11861's
+over-22 exception is for a dependent unable to care for THEMSELVES due to disability.
+**Fix:** `derive_dependent_children()` keys the exception on the member's own PWD flag
+only (applicant PWD still raises priority scoring). JS mirror updated to match.
+
+## R2-5. `max_applicant_age: 120` existed in rules.json but was enforced nowhere *(MEDIUM)*
+Age 176 (birthdate 1850) evaluated Eligible. **Fix:** `engine.evaluate()` now rejects
+above the cap, symmetric with the min-age check. (Dataset unaffected — still 100%.)
+
+## R2-6. Unrecognized enum values *bypassed* the consistency guards instead of failing *(MEDIUM-HIGH)*
+`civil_status="widow"` skipped the whole civil-status/reason matrix (permissive default on
+unknown key); `sex="m"` slipped past the male+pregnancy guard.
+**Fix:** hard-error whitelists — sex ∈ `VALID_SEX_VALUES`, civil status ∈
+`CIVIL_STATUS_ALLOWED_REASONS` keys, reason ∈ `TYPE_OF_SOLO_PARENT_MAP` keys.
+
+## R2-7. A "Dependent" with declared income but blank occupation counted as unemployed *(MEDIUM-HIGH)*
+₱30,000/month income + empty occupation still qualified as a dependent.
+**Fix:** `_member_is_employed()` treats declared income > 0 as employed regardless of
+occupation text; remarks now say "employed or has a declared income". JS mirror
+(`memberRowIsEmployed`) keeps the auto-derived count honest live, and the roster listener
+re-syncs on occupation/income edits.
+
+## R2-8. No applicant occupation ↔ income cross-check *(MEDIUM — soft)*
+"Unemployed" + ₱80,000/month, or "Teacher" + ₱0, each individually valid, collect more
+benefits than either consistent story. **Fix:** soft warnings (needs-verification flag,
+not a block — informal income is legitimate): unemployed with income above minimum wage,
+or employed/self-employed/part-time with ₱0.
+
+## R2-9. Contact number: the validator's comment assumed a required-field check that didn't exist *(LOW-MEDIUM)*
+`validate_ph_contact` treated blank as "handled by the required-field check", but
+`contact_no` wasn't in `REQUIRED_SUBMISSION_FIELDS`. **Fix:** added (the form already
+marked it required client-side).
+
+## R2-minor (both implemented)
+- Family-row **birthday vs. age reconciliation**: hard error when they disagree by more
+  than a year (the form derives age from birthday, so a mismatch means tampering or a
+  stale value).
+- **Duplicate detection key is now name + birthday** (server and JS): a father and son
+  sharing a name are no longer wrongly blocked; the same person listed twice still is.
+
+## UX: missing-required-field highlighting (user-reported)
+The form previously scrolled to the top on an incomplete submit with no indication of
+what was missing. Now (`assessment_form.html`, form is `novalidate` with JS-driven
+checks): every missing/invalid required field is highlighted red in place with an inline
+message (radio groups get a group-level message), a clickable error summary is inserted
+at the top of the form (click an item to jump to that field), and the page auto-scrolls
+to the FIRST problem field instead of the top. Highlights clear live as fields are
+filled. The old `alert()` list for logical problems now renders in the same summary box.
