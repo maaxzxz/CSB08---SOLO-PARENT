@@ -1,0 +1,106 @@
+{
+  "law": "RA 11861 (Expanded Solo Parents Welfare Act)",
+  "thresholds": {
+    "min_wage_monthly": 16000,
+    "vat_discount_annual_income_limit": 250000,
+    "vat_discount_monthly_limit": 20833,
+    "poverty_line_monthly": 15000,
+    "vat_discount_max_child_age": 6
+  },
+  "categories": {
+    "Birth of child due to rape":                          { "min_duration_months": 0,  "needs_dependent": true,  "is_pregnancy_category": false },
+    "Death of spouse":                                      { "min_duration_months": 0,  "needs_dependent": true,  "is_pregnancy_category": false },
+    "Detention of spouse (3+ months) or serving sentence":  { "min_duration_months": 3,  "needs_dependent": true,  "is_pregnancy_category": false },
+    "Physical or mental incapacity of spouse":              { "min_duration_months": 0,  "needs_dependent": true,  "is_pregnancy_category": false },
+    "Legal or de facto separation":                         { "min_duration_months": 6,  "needs_dependent": true,  "is_pregnancy_category": false },
+    "Declaration of nullity, annulment, or divorce":        { "min_duration_months": 0,  "needs_dependent": true,  "is_pregnancy_category": false },
+    "Abandonment by spouse":                                { "min_duration_months": 6,  "needs_dependent": true,  "is_pregnancy_category": false },
+    "Spouse/family member/guardian of an OFW":              { "min_duration_months": 12, "needs_dependent": true,  "is_pregnancy_category": false },
+    "Unmarried parent who keeps and rears the child":       { "min_duration_months": 0,  "needs_dependent": true,  "is_pregnancy_category": false },
+    "Legal guardian, adoptive, or foster parent":           { "min_duration_months": 0,  "needs_dependent": true,  "is_pregnancy_category": false },
+    "Relative within 4th civil degree assuming care":       { "min_duration_months": 6,  "needs_dependent": true,  "is_pregnancy_category": false },
+    "Pregnant woman solely responsible for unborn child":   { "min_duration_months": 0,  "needs_dependent": false, "is_pregnancy_category": true }
+  },
+  "required_applicant_fields": [
+    "type_of_solo_parent", "duration_months", "is_pregnant", "number_of_dependents",
+    "monthly_income", "employment_status", "with_pwd", "youngest_child_age",
+    "receiving_other_govt_cash_aid", "formal_philhealth_member",
+    "dependent_currently_studying"
+  ],
+  "benefits": [
+    {
+      "id": "cash_subsidy_sec15a",
+      "label": "Cash Subsidy",
+      "section": "Sec. 15(a)",
+      "condition": {
+        "all": [
+          { "field": "monthly_income", "op": "<=", "value_ref": "min_wage_monthly" },
+          { "field": "receiving_other_govt_cash_aid", "op": "==", "value": false }
+        ]
+      }
+    },
+    {
+      "id": "vat_discount_sec15b",
+      "label": "VAT Discount/Exemption",
+      "section": "Sec. 15(b)",
+      "condition": {
+        "all": [
+          { "field": "monthly_income", "op": "<", "value_ref": "vat_discount_monthly_limit" },
+          { "field": "youngest_child_age", "op": "between", "min": -1, "max_ref": "vat_discount_max_child_age" }
+        ]
+      }
+    },
+    {
+      "id": "philhealth_coverage_sec15c",
+      "label": "PhilHealth / NHIP Automatic Coverage",
+      "section": "Sec. 15(c)",
+      "condition": {
+        "all": [
+          { "field": "formal_philhealth_member", "op": "==", "value": false }
+        ]
+      }
+    },
+    {
+      "id": "livelihood_priority_sec15d",
+      "label": "Livelihood / Employment Priority",
+      "section": "Sec. 15(d)",
+      "condition": {
+        "all": [
+          { "field": "employment_status", "op": "in", "value": ["Unemployed", "Part-Time"] }
+        ]
+      }
+    },
+    {
+      "id": "housing_priority_sec15e",
+      "label": "Housing Priority",
+      "section": "Sec. 15(e)",
+      "condition": {
+        "all": [
+          { "field": "monthly_income", "op": "<=", "value_ref": "poverty_line_monthly" }
+        ]
+      }
+    },
+    {
+      "id": "educational_support_sec9",
+      "label": "Educational Support",
+      "section": "Sec. 9",
+      "condition": {
+        "all": [
+          { "field": "number_of_dependents", "op": ">=", "value": 1 },
+          { "field": "dependent_currently_studying", "op": "==", "value": true }
+        ]
+      }
+    }
+  ],
+  "fallback_benefit_if_none_qualify": "philhealth_coverage_sec15c",
+  "priority_scoring": {
+    "weight_per_benefit": 1,
+    "weight_with_pwd": 2,
+    "weight_is_pregnant": 2,
+    "weight_per_dependent_pair": 1,
+    "dependent_pair_divisor": 2,
+    "dependent_pair_cap": 3,
+    "high_threshold": 6,
+    "medium_threshold": 3
+  }
+}
