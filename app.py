@@ -843,6 +843,18 @@ def extract_ml_features(form_data):
     }
     mapped_civil_status = civil_status_map.get(form_data.get('civil_status', '').strip().lower(), 'Single')
 
+    # Derive With_PWD and Number_of_Dependents the same way the rule engine
+    # does (see derive_dependent_children), instead of trusting the raw
+    # posted fields directly. Without this, a dependent whose OWN "PWD" box
+    # is checked (but the applicant's separate, general "with_pwd" question
+    # is "No") would look PWD-blind to the ML model — even though the rule
+    # engine correctly applies the over-22 PWD age exception for that same
+    # dependent. That mismatch is a real, fixable source of rule-vs-ML
+    # disagreement, not just an inherent modeling limitation.
+    applicant_with_pwd = form_data.get('with_pwd', 'No') == 'Yes'
+    is_pregnancy = solo_parent_type == 'pregnant_woman_unborn_child'
+    dep_info = derive_dependent_children(family_members, is_pregnancy=is_pregnancy)
+
     features = {
         'Age': age,
         'Gender': mapped_gender,
@@ -850,9 +862,9 @@ def extract_ml_features(form_data):
         'Educational_Attainment': form_data.get('educational_attainment', '').strip() or 'Elementary',
         'Employment_Status': infer_employment_status(form_data.get('occupation', '')),
         'Monthly_Income': parse_money(form_data.get('monthly_income', 0)),
-        'Number_of_Dependents': int(form_data.get('number_of_dependent_children', 0) or 0),
+        'Number_of_Dependents': dep_info['count'],
         'With_Minor': has_minor_dependents(family_members),
-        'With_PWD': form_data.get('with_pwd', 'No'),
+        'With_PWD': 'Yes' if (applicant_with_pwd or dep_info['any_pwd']) else 'No',
         'Type_of_Solo_Parent': mapped_type
     }
 
