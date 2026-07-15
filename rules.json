@@ -5,7 +5,11 @@
     "vat_discount_annual_income_limit": 250000,
     "vat_discount_monthly_limit": 20833,
     "poverty_line_monthly": 15000,
-    "vat_discount_max_child_age": 6
+    "vat_discount_max_child_age": 6,
+    "min_applicant_age": 18,
+    "max_applicant_age": 120,
+    "max_dependent_age": 22,
+    "unborn_child_age_sentinel": -1
   },
   "categories": {
     "Birth of child due to rape":                          { "min_duration_months": 0,  "needs_dependent": true,  "is_pregnancy_category": false },

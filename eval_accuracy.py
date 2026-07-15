@@ -33,6 +33,7 @@ def row_to_applicant(row) -> Applicant:
         receiving_other_govt_cash_aid=(row["Receiving_Other_Govt_Cash_Aid"] == "Yes"),
         formal_philhealth_member=(row["Formal_PhilHealth_Member"] == "Yes"),
         dependent_currently_studying=(row["Dependent_Currently_Studying"] == "Yes"),
+        age=(None if pd.isna(row.get("Age")) else int(row["Age"])),
     )
 
 

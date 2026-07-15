@@ -95,6 +95,11 @@
                             <span class="badge bg-warning text-dark">Needs Verification</span>
                         </div>
                         {% endif %}
+                        {% if result.guard_warnings %}
+                        <ul class="small mb-0 mt-2 text-start d-inline-block">
+                            {% for w in result.guard_warnings %}<li>{{ w }}</li>{% endfor %}
+                        </ul>
+                        {% endif %}
                     </div>
                     {% endif %}
 
@@ -126,6 +131,14 @@
                         <div class="result-icon">
                             <i class="fas fa-times-circle text-danger"></i>
                         </div>
+                        {% if result.guard_errors %}
+                        <h2 class="status-heading">Submission Needs Correction</h2>
+                        <p class="text-muted mb-2">This assessment could not be completed because the information provided is inconsistent or incomplete:</p>
+                        <ul class="small text-start d-inline-block text-danger mb-2">
+                            {% for e in result.guard_errors %}<li>{{ e }}</li>{% endfor %}
+                        </ul>
+                        <p class="text-muted mb-0">Please correct the above and submit the assessment again.</p>
+                        {% else %}
                         <h2 class="status-heading">Currently Not Eligible</h2>
                         {% if result.remarks %}
                         <p class="text-muted mb-2">{{ result.remarks }}</p>
@@ -133,6 +146,7 @@
                         <p class="text-muted mb-2">Based on the information provided in your application, you do not currently meet the eligibility criteria for the Solo Parent benefits under RA 11861.</p>
                         {% endif %}
                         <p class="text-muted mb-0">If your circumstances change (such as changes in income, employment, duration, or number of dependents), you are welcome to submit a new assessment.</p>
+                        {% endif %}
                     </div>
                     {% endif %}
 

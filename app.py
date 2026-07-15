@@ -186,6 +186,143 @@ TYPE_OF_SOLO_PARENT_MAP = {
     # 'rape': 'Birth of child due to rape'
 }
 
+# ---------------------------------------------------------------------------
+# Submission integrity guards (see LOOSE_LOGIC.md)
+# ---------------------------------------------------------------------------
+# Core fields a real assessment cannot be produced without. The HTML form
+# marks these required, but a direct POST bypasses that — this list is the
+# server-side backstop so a malformed submission is rejected instead of
+# silently producing a result/PDF from blanks. (#10)
+REQUIRED_SUBMISSION_FIELDS = [
+    ('first_name', 'First name'),
+    ('surname', 'Surname'),
+    ('birthday', 'Birthday'),
+    ('sex', 'Sex'),
+    ('civil_status', 'Civil status'),
+    ('monthly_income', 'Monthly income'),
+    ('solo_parent_status', 'Reason for being a solo parent'),
+    ('number_of_dependent_children', 'Number of dependent children'),
+    ('with_pwd', 'PWD registration answer'),
+    ('youngest_child_age', 'Age of youngest dependent child'),
+    ('receiving_other_govt_cash_aid', 'Other government cash aid answer'),
+    ('formal_philhealth_member', 'PhilHealth membership answer'),
+    ('dependent_currently_studying', 'Dependent currently studying answer'),
+]
+
+# Which solo-parent reasons are logically consistent with each civil status
+# (#4). Reasons tied to the applicant's OWN marriage are gated; guardianship,
+# caregiver, grandparent, pregnancy, and OFW-related reasons are not about the
+# applicant's marital status and are allowed under any civil status. This is a
+# policy default meant to block clear contradictions (e.g. "Single" + a
+# spouse-based reason) without over-blocking plausible cases — tune here.
+_CIVIL_STATUS_NEUTRAL_REASONS = {
+    'guardian_adoptive_foster_parent',
+    'relative_caregiver_4th_degree',
+    'solo_grandparent_caregiver',
+    'pregnant_woman_unborn_child',
+    'ofw_related_guardian',
+}
+CIVIL_STATUS_ALLOWED_REASONS = {
+    'single':    {'single_parent_unmarried'} | _CIVIL_STATUS_NEUTRAL_REASONS,
+    'married':   {'abandoned', 'spouse_detained_convicted', 'spouse_incapacitated_medical'} | _CIVIL_STATUS_NEUTRAL_REASONS,
+    'separated': {'separated_divorced', 'abandoned', 'spouse_detained_convicted', 'spouse_incapacitated_medical'} | _CIVIL_STATUS_NEUTRAL_REASONS,
+    'annulled':  {'annulled_nullified_marriage'} | _CIVIL_STATUS_NEUTRAL_REASONS,
+    'divorced':  {'annulled_nullified_marriage'} | _CIVIL_STATUS_NEUTRAL_REASONS,
+    'widowed':   {'widowed'} | _CIVIL_STATUS_NEUTRAL_REASONS,
+}
+
+# Absolute ceiling on a claimed circumstance duration, independent of age
+# (#8). 100 years in months — anything beyond is a data-entry error.
+MAX_DURATION_MONTHS = 1200
+
+
+def count_dependent_roster_rows(family_members):
+    """How many household rows are plausibly the applicant's dependents —
+    relationship of Child or Dependent (used to sanity-check the declared
+    dependent-children count, #6)."""
+    count = 0
+    for m in family_members:
+        rel = str(m.get('relationship', '')).strip().lower()
+        if rel in ('child', 'dependent'):
+            count += 1
+    return count
+
+
+def evaluate_submission_guards(data, *, solo_parent_status, civil_status, sex,
+                               monthly_income, youngest_child_age_raw,
+                               duration_months, number_of_children, age,
+                               family_members, dependent_currently_studying):
+    """Cross-field integrity checks that live OUTSIDE the rules engine (the
+    engine stays a pure, dataset-validated RA 11861 evaluator). Returns
+    (hard_errors, soft_warnings):
+      - hard_errors  -> the submission is invalid/impossible; caller marks it
+                        Not Eligible and shows the reasons.
+      - soft_warnings-> plausible but suspicious; caller flags for MSWDO/DSWD
+                        verification without blocking.
+    """
+    hard_errors = []
+    soft_warnings = []
+
+    # #10 required fields (server-side backstop for direct POSTs)
+    for field_name, label in REQUIRED_SUBMISSION_FIELDS:
+        if not str(data.get(field_name, '')).strip():
+            hard_errors.append(f"Missing required field: {label}.")
+
+    # #7 income cannot be negative (rejecting, not clamping — clamping a
+    # negative to 0 would wrongly unlock the lowest, most generous tier)
+    if monthly_income < 0:
+        hard_errors.append("Monthly income cannot be negative.")
+
+    # #3 pregnancy category requires female applicant
+    if solo_parent_status == 'pregnant_woman_unborn_child' and sex.strip().lower() == 'male':
+        hard_errors.append("The pregnancy category cannot be selected with sex recorded as Male.")
+
+    # #5 the -1 "unborn" sentinel is only meaningful for the pregnancy category
+    youngest_raw = str(youngest_child_age_raw).strip()
+    if youngest_raw == '-1' and solo_parent_status != 'pregnant_woman_unborn_child':
+        hard_errors.append("Youngest child age -1 (unborn) is only valid for the pregnant-woman category.")
+
+    # #4 civil status vs. reason consistency
+    allowed = CIVIL_STATUS_ALLOWED_REASONS.get(civil_status.strip().lower())
+    if allowed is not None and solo_parent_status and solo_parent_status not in allowed:
+        hard_errors.append(
+            f'"{get_solo_parent_status_label(solo_parent_status)}" is not consistent with a '
+            f'civil status of "{format_civil_status(civil_status)}".'
+        )
+
+    # #8 duration sanity: absolute cap, and not longer than the applicant has
+    # been alive
+    if duration_months > MAX_DURATION_MONTHS:
+        hard_errors.append(f"Reported duration ({duration_months} months) is implausibly large.")
+    elif age and duration_months > age * 12:
+        hard_errors.append(
+            f"Reported duration ({duration_months} months) exceeds the applicant's age "
+            f"({age} years) — the circumstance cannot predate the applicant."
+        )
+
+    # #6 declared dependent count vs. the household roster (soft — the roster
+    # may legitimately omit some, so flag rather than block)
+    roster_dependents = count_dependent_roster_rows(family_members)
+    if number_of_children > 0 and roster_dependents < number_of_children:
+        soft_warnings.append(
+            f"Declared {number_of_children} dependent child(ren) but only {roster_dependents} "
+            f"child/dependent row(s) are listed in the family composition."
+        )
+
+    # #11 "a dependent is currently studying" but the only dependent is too
+    # young to be enrolled (soft — older siblings may exist if >1 child)
+    try:
+        youngest_int = int(youngest_raw)
+    except (TypeError, ValueError):
+        youngest_int = None
+    if (dependent_currently_studying and number_of_children == 1
+            and youngest_int is not None and youngest_int < 3):
+        soft_warnings.append(
+            "Marked a dependent as currently studying, but the only dependent is under 3 years old."
+        )
+
+    return hard_errors, soft_warnings
+
 
 def format_civil_status(value):
     status_map = {
@@ -489,7 +626,6 @@ def assess_eligibility(data):
     occupation = data.get('occupation', '').strip()
 
     monthly_income = parse_money(data.get('monthly_income', 0))
-    total_family_income = parse_money(data.get('total_family_income', 0))
 
     solo_parent_status = data.get('solo_parent_status', '').strip().lower()
     status_specific_answer = data.get('category_duration_answer', '').strip()
@@ -506,6 +642,11 @@ def assess_eligibility(data):
 
     # Parse family members
     family_members = parse_family_members(data)
+
+    # #12: Total family income is recomputed authoritatively from the family
+    # composition rows here, rather than trusting the (read-only, but still
+    # POST-able) total_family_income field the client submits.
+    total_family_income = sum(float(m.get('income', 0) or 0) for m in family_members)
 
     # Store applicant info
     result['applicant_info'] = {
@@ -555,7 +696,8 @@ def assess_eligibility(data):
                                                   solo_parent_status=solo_parent_status,
                                                   status_specific_answer=status_specific_answer,
                                                   number_of_children=number_of_children,
-                                                  monthly_income=monthly_income)
+                                                  monthly_income=monthly_income,
+                                                  age=age)
     engine_result = rule_engine_evaluate(rule_applicant)
 
     result['eligible'] = engine_result['eligibility'] == 'Eligible'
@@ -566,6 +708,38 @@ def assess_eligibility(data):
     # boolean); needs_verification is now only set by the ML-conflict and
     # income-outlier safety nets in submit_assessment().
     result['needs_verification'] = False
+
+    # Submission integrity guards (see LOOSE_LOGIC.md / evaluate_submission_guards).
+    # These live outside the rules engine so the engine stays a pure,
+    # dataset-validated RA 11861 evaluator.
+    try:
+        rule_duration_months = int(status_specific_answer)
+    except (TypeError, ValueError):
+        rule_duration_months = 0
+    hard_errors, soft_warnings = evaluate_submission_guards(
+        data,
+        solo_parent_status=solo_parent_status,
+        civil_status=civil_status,
+        sex=sex,
+        monthly_income=monthly_income,
+        youngest_child_age_raw=data.get('youngest_child_age', ''),
+        duration_months=rule_duration_months,
+        number_of_children=number_of_children,
+        age=age,
+        family_members=family_members,
+        dependent_currently_studying=(data.get('dependent_currently_studying', 'No') == 'Yes'),
+    )
+    result['guard_errors'] = hard_errors
+    result['guard_warnings'] = soft_warnings
+
+    # A hard integrity error overrides any "Eligible" verdict: the submission
+    # is inconsistent/impossible, so no benefits are extended and the reasons
+    # are surfaced to the applicant.
+    if hard_errors:
+        result['eligible'] = False
+        result['priority_level'] = None
+        result['remarks'] = ' '.join(hard_errors)
+        engine_result = {**engine_result, 'benefits': {}}
 
     result['benefits'] = []
     if result['eligible']:
@@ -581,7 +755,7 @@ def assess_eligibility(data):
 
 def build_rule_engine_applicant(data, *, occupation, solo_parent_status,
                                  status_specific_answer, number_of_children,
-                                 monthly_income):
+                                 monthly_income, age=None):
     """Translates this form's raw field names/values into the Applicant
     shape engine.evaluate() expects. Pure field-name translation only — no
     eligibility thresholds or category lists belong here; those live in
@@ -613,6 +787,7 @@ def build_rule_engine_applicant(data, *, occupation, solo_parent_status,
         receiving_other_govt_cash_aid=(data.get('receiving_other_govt_cash_aid', 'No') == 'Yes'),
         formal_philhealth_member=(data.get('formal_philhealth_member', 'No') == 'Yes'),
         dependent_currently_studying=(data.get('dependent_currently_studying', 'No') == 'Yes'),
+        age=age,
     )
 
 
@@ -646,7 +821,8 @@ def submit_assessment():
         age = 0
 
     monthly_income = parse_money(form_data.get('monthly_income', 0))
-    total_family_income = parse_money(form_data.get('total_family_income', 0))
+    # #12: recomputed from the family rows, not trusted from the posted total.
+    total_family_income = sum(float(m.get('income', 0) or 0) for m in family_members)
 
     try:
         number_of_children = int(form_data.get('number_of_dependent_children', 0))
@@ -716,6 +892,13 @@ def submit_assessment():
     rule_conflict = False
     result['remarks'] = rule_result.get('remarks', '')
     result['priority_level'] = rule_result.get('priority_level')
+    result['guard_errors'] = rule_result.get('guard_errors', [])
+    result['guard_warnings'] = rule_result.get('guard_warnings', [])
+
+    # Soft integrity warnings (roster mismatch, etc.) don't block eligibility
+    # but flag an eligible case for MSWDO/DSWD verification.
+    if result['guard_warnings'] and is_eligible:
+        needs_verification = True
 
     if ml_result.get('model_status') == 'success':
         if ml_result['eligible'] != rule_result['eligible']:

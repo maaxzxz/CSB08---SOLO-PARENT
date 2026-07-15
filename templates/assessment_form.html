@@ -252,7 +252,7 @@
 
                             <div class="mb-3 d-none" id="categoryFollowUpContainer">
                                 <label for="category_duration_answer" class="form-label" id="categoryFollowUpLabel"></label>
-                                <input type="text" class="form-control numeric-only" id="category_duration_answer" name="category_duration_answer" placeholder="Enter number of months" inputmode="numeric" pattern="[0-9]+">
+                                <input type="text" class="form-control numeric-only" id="category_duration_answer" name="category_duration_answer" placeholder="Enter number of months" inputmode="numeric" pattern="[0-9]+" maxlength="4">
                             </div>
 
                             <div class="mb-3">
@@ -284,6 +284,9 @@
                         <div class="form-section mb-5">
                             <h5 class="section-title">IV. BENEFIT SCREENING</h5>
                             <p class="text-muted small mb-3">These determine which specific RA 11861 benefits you may qualify for.</p>
+                            <div class="alert alert-info small py-2 px-3 mb-3">
+                                <i class="fas fa-info-circle"></i> Your answers below are self-declared and subject to verification by MSWDO/DSWD. Supporting documents may be requested during your interview.
+                            </div>
 
                             <div class="mb-3">
                                 <label for="youngest_child_age" class="form-label">Age of Youngest Dependent Child <span class="text-danger">*</span></label>
@@ -434,10 +437,13 @@
         bindCurrencyHandlers(document);
 
         document.querySelectorAll('input[name="solo_parent_status"]').forEach(function(radio) {
-            radio.addEventListener('change', toggleCategoryFollowUp);
+            radio.addEventListener('change', function() {
+                toggleCategoryFollowUp();
+                applyYoungestChildAgeGate();
+            });
         });
 
-        document.querySelectorAll('input[name="civil_status"]').forEach(function(radio) {
+        document.querySelectorAll('input[name="civil_status"], input[name="sex"]').forEach(function(radio) {
             radio.addEventListener('change', applyCivilStatusGate);
         });
 
@@ -562,38 +568,69 @@
         'ofw_related_guardian': 'OFW-Related Guardian'
     };
 
-    // Civil statuses that rule out specific "Reason for Being a Solo
-    // Parent" options, while leaving every other reason free to choose
-    // (e.g. a currently Married applicant can't also be "Widowed" or have
-    // an "Annulled / Nullified Marriage"). Annulled/Divorced applicants are
-    // NOT restricted here — all reasons remain selectable for them.
-    const CIVIL_STATUS_DISALLOWS = {
-        'married': ['annulled_nullified_marriage', 'widowed']
+    // Which reasons are consistent with each civil status. MIRRORS the
+    // server's CIVIL_STATUS_ALLOWED_REASONS (app.py) — keep the two in sync.
+    // Guardianship/caregiver/grandparent/pregnancy/OFW reasons aren't about
+    // the applicant's own marriage, so they're allowed under any status.
+    const NEUTRAL_REASONS = [
+        'guardian_adoptive_foster_parent',
+        'relative_caregiver_4th_degree',
+        'solo_grandparent_caregiver',
+        'pregnant_woman_unborn_child',
+        'ofw_related_guardian'
+    ];
+    const CIVIL_STATUS_ALLOWED_REASONS = {
+        'single':    ['single_parent_unmarried'].concat(NEUTRAL_REASONS),
+        'married':   ['abandoned', 'spouse_detained_convicted', 'spouse_incapacitated_medical'].concat(NEUTRAL_REASONS),
+        'separated': ['separated_divorced', 'abandoned', 'spouse_detained_convicted', 'spouse_incapacitated_medical'].concat(NEUTRAL_REASONS),
+        'annulled':  ['annulled_nullified_marriage'].concat(NEUTRAL_REASONS),
+        'divorced':  ['annulled_nullified_marriage'].concat(NEUTRAL_REASONS),
+        'widowed':   ['widowed'].concat(NEUTRAL_REASONS)
     };
 
     function applyCivilStatusGate() {
         const civilStatusInput = document.querySelector('input[name="civil_status"]:checked');
         const civilStatus = civilStatusInput ? civilStatusInput.value : '';
-        const disallows = CIVIL_STATUS_DISALLOWS[civilStatus] || [];
+        const sexInput = document.querySelector('input[name="sex"]:checked');
+        const sex = sexInput ? sexInput.value : '';
+        const allowed = CIVIL_STATUS_ALLOWED_REASONS[civilStatus] || null;
         const note = document.getElementById('soloParentReasonNote');
+        const notes = [];
 
         document.querySelectorAll('input[name="solo_parent_status"]').forEach(function(radio) {
-            const isAllowed = disallows.indexOf(radio.value) === -1;
+            let isAllowed = allowed ? (allowed.indexOf(radio.value) !== -1) : true;
+            // Pregnancy category requires a female applicant.
+            if (radio.value === 'pregnant_woman_unborn_child' && sex === 'male') {
+                isAllowed = false;
+            }
             radio.disabled = !isAllowed;
             if (!isAllowed && radio.checked) {
                 radio.checked = false;
             }
         });
 
-        if (disallows.length) {
-            const disallowedLabels = disallows.map(function(v) { return SOLO_PARENT_REASON_LABELS[v]; }).join('", "');
-            note.textContent = 'Since your civil status is "' + toTitleCase(civilStatus) + '": "' + disallowedLabels + '" ' + (disallows.length > 1 ? 'do' : 'does') + ' not apply as your reason for being a solo parent.';
+        if (allowed && civilStatus) {
+            note.textContent = 'Only reasons consistent with a civil status of "' + toTitleCase(civilStatus) + '" can be selected.';
             note.classList.remove('d-none');
         } else {
             note.classList.add('d-none');
         }
 
         toggleCategoryFollowUp();
+        applyYoungestChildAgeGate();
+    }
+
+    // #5: the -1 "unborn" value for youngest child age is only meaningful for
+    // the pregnancy category; otherwise require a real age (>= 0).
+    function applyYoungestChildAgeGate() {
+        const selected = document.querySelector('input[name="solo_parent_status"]:checked');
+        const isPregnancy = selected && selected.value === 'pregnant_woman_unborn_child';
+        const field = document.getElementById('youngest_child_age');
+        if (!field) return;
+        field.min = isPregnancy ? '-1' : '0';
+        if (!isPregnancy && field.value === '-1') {
+            field.value = '';
+        }
     }
 
     function toggleCategoryFollowUp() {

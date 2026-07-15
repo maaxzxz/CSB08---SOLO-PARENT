@@ -28,6 +28,7 @@ class Applicant:
     receiving_other_govt_cash_aid: bool
     formal_philhealth_member: bool
     dependent_currently_studying: bool
+    age: int | None = None               # applicant's own age; None = unknown/not provided
 
 
 def _resolve(condition_node: dict, applicant: dict, thresholds: dict) -> bool:
@@ -99,8 +100,19 @@ def evaluate(applicant: Applicant) -> dict:
         return {"eligibility": "Not Eligible", "remarks": "Unrecognized solo parent category.",
                 "benefits": {}, "recommendation": [], "priority_level": None}
 
+    thresholds = RULES["thresholds"]
+    min_age = thresholds.get("min_applicant_age")
+    max_dependent_age = thresholds.get("max_dependent_age")
+
     # --- eligibility ---
-    if cat["is_pregnancy_category"]:
+    # Applicant must be an adult. A solo parent is, by definition, an adult
+    # caregiver; a minor (or an obviously bogus birthdate) is not eligible.
+    # Applies to every category, including pregnancy.
+    if min_age is not None and applicant.age is not None and applicant.age < min_age:
+        eligibility = "Not Eligible"
+        remarks = (f"Applicant is {applicant.age} year(s) old; RA 11861 solo-parent "
+                   f"benefits require the applicant to be at least {min_age}.")
+    elif cat["is_pregnancy_category"]:
         if applicant.is_pregnant:
             eligibility, remarks = "Eligible", ""
         else:
@@ -114,6 +126,18 @@ def evaluate(applicant: Applicant) -> dict:
         eligibility = "Not Eligible"
         remarks = ("No qualifying dependent child under the applicant's care; RA 11861 "
                    "requires sole parental care and support of a child.")
+    elif (max_dependent_age is not None
+          and applicant.youngest_child_age is not None
+          and applicant.youngest_child_age > max_dependent_age
+          and not applicant.with_pwd):
+        # RA 11861 counts a dependent only if 22 or younger, or older but
+        # unable to care for themselves due to disability. If even the
+        # YOUNGEST dependent is over the age cap and no PWD dependent was
+        # declared, none of them qualify.
+        eligibility = "Not Eligible"
+        remarks = (f"The youngest dependent is {applicant.youngest_child_age} years old; RA 11861 "
+                   f"counts a dependent only if {max_dependent_age} or younger, or older with a "
+                   f"disability. No qualifying dependent was declared.")
     else:
         eligibility, remarks = "Eligible", ""
 
@@ -131,7 +155,6 @@ def evaluate(applicant: Applicant) -> dict:
         "number_of_dependents": applicant.number_of_dependents,
         "dependent_currently_studying": applicant.dependent_currently_studying,
     }
-    thresholds = RULES["thresholds"]
 
     benefits = {}
     recommendation = []
