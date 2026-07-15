@@ -1,6 +1,6 @@
 # Solo Parent Decision Support System (DSS)
 
-An AI-powered web application to assess eligibility for Solo Parent benefits under **Republic Act 11861** (Solo Parent Welfare Act).
+A web application to assess eligibility for Solo Parent benefits under **Republic Act 11861** (Expanded Solo Parents Welfare Act) and its Revised IRR.
 
 ## Features
 
@@ -8,41 +8,35 @@ An AI-powered web application to assess eligibility for Solo Parent benefits und
 - Section I: Identifying Information (personal details, income, occupation)
 - Section II: Family Composition (dynamic table for household members)
 - Section III: Solo Parent Status (reason and circumstances)
+- Section IV: Benefit Screening (fields that determine which specific benefits apply)
 
-✨ **Intelligent Eligibility Assessment**
-- Rule-based logic aligned with RA 11861 criteria
-- Three-tier eligibility status: Eligible, Needs Verification, Not Eligible
-- Income threshold calculations based on family size
-- Applicant-facing first-step screening plus MSWDO support for verification and case triage
-
-✨ **Current Build Status**
-- Core assessment and PDF workflow are implemented
-- Model-assisted screening is integrated
-- Remaining work is mainly for staff workflows, case tracking, document upload, and analytics
+✨ **Rules-Engine-Driven Eligibility Assessment**
+- Eligibility, benefits, priority level, and rejection reason are all decided by `engine.py`, which reads every threshold, category, and benefit condition from `rules.json` — nothing is hardcoded in `app.py`
+- A secondary ML model (Random Forest) scores each case independently for a confidence percentage and flags disagreement with the rules engine for manual review; it does not decide eligibility
+- Independent income-outlier check flags applicants far outside the training dataset's income range for manual review
 
 ✨ **PDF Report Generation**
-- Professional questionnaire-formatted PDF
-- Includes applicant info, family composition, and results
-- Personalized recommendations based on eligibility status
+- Government-form-styled PDF (ReportLab)
+- Includes applicant info, family composition, eligibility result, and the exact benefits granted
 - Auto-download functionality
 
 ✨ **Professional UI**
 - Dark navy color scheme with dark red accents
 - Responsive Bootstrap design
 - Font Awesome icons
-- Mobile-friendly interface
 
 ## Tech Stack
 
 - **Backend:** Flask (Python)
+- **Rules engine:** Plain Python (`engine.py`), config-driven by `rules.json`
 - **Frontend:** Bootstrap 5, Jinja2 Templates
 - **PDF Generation:** ReportLab
-- **Data Processing:** Pandas, NumPy
+- **ML (secondary signal only):** scikit-learn (Random Forest, calibrated)
 
 ## Installation
 
 ### Prerequisites
-- Python 3.8+
+- Python 3.10+
 - pip (Python package manager)
 
 ### Setup
@@ -85,81 +79,87 @@ An AI-powered web application to assess eligibility for Solo Parent benefits und
 
 ```
 solo-parent-dss/
-├── app.py                    # Main Flask application
-├── requirements.txt          # Python dependencies
-├── .gitignore               # Git ignore rules
+├── app.py                    # Flask app: routes, form parsing, PDF generation
+├── engine.py                 # Pure evaluate(applicant) rules engine — reads only rules.json
+├── rules.json                # Single source of truth: categories, thresholds, benefit
+│                              # conditions, priority scoring. Edit this, not the code,
+│                              # when the law/thresholds change.
+├── eval_accuracy.py          # Validates engine.py against data/solo_parent_dataset.csv,
+│                              # reporting per-field accuracy (not one blended number)
+├── train_model_fixed.py      # Trains/tunes the secondary ML confidence model
+├── requirements.txt
+├── .gitignore
 │
 ├── templates/
-│   ├── base.html            # Base template with navbar/footer
-│   ├── index.html           # Homepage with benefits showcase
-│   ├── assessment_form.html # Application form (3 sections)
-│   └── result.html          # Results page with PDF download
+│   ├── base.html                        # Base template with navbar/footer
+│   ├── index.html                       # Homepage
+│   ├── assessment_form.html             # Application form (4 sections)
+│   ├── result.html                      # Results page with PDF download
+│   └── _result_technical_details.html   # ML confidence / conflict details (collapsible)
 │
 ├── static/
-│   ├── css/
-│   │   └── style.css        # Custom styling
-│   └── js/
-│       └── script.js        # (Optional) JavaScript utilities
+│   └── css/style.css        # Custom styling
 │
 ├── data/
-│   └── solo_parent_dataset.csv           # Training and sample data
+│   └── solo_parent_dataset.csv    # Labeled dataset used by both eval_accuracy.py
+│                                    # and train_model_fixed.py
 │
-├── model/
-│   ├── solo_parent_model.pkl    # Trained model artifact
-│   ├── encoders.pkl             # Label encoders used by the model
-│   └── model_metadata.pkl       # Training metrics and benchmark summary
-│
-└── reports/
-    └── (Generated PDF reports saved here)
+└── model/
+    ├── solo_parent_model.pkl    # Trained ML model artifact (secondary confidence signal)
+    ├── encoders.pkl
+    └── model_metadata.pkl       # Training metrics and benchmark summary
 ```
 
 ## Usage
 
 ### 1. Fill Assessment Form
 - Enter personal information
-- Add family members (name, relationship, age, education)
+- Add family members (name, relationship, age, education, income)
 - Provide monthly income details
 - Select solo parent status/reason
+- Answer the benefit-screening questions (Section IV)
 
 ### 2. Submit & Get Results
-- System automatically assesses eligibility
-- Three possible outcomes:
-  - ✅ **Eligible** - Qualifies for all RA 11861 benefits
-  - ⚠️ **Needs Verification** - Requires additional documents
-  - ❌ **Not Eligible** - Doesn't meet current criteria
+- The rules engine (`engine.evaluate()`) decides eligibility, applicable benefits, priority level, and — if not eligible — the specific reason
+- Two possible outcomes:
+  - ✅ **Eligible** — lists exactly which of the 6 RA 11861 benefits apply, plus a priority level (High/Medium/Low)
+  - ❌ **Not Eligible** — shows the specific reason (invalid category, duration below the legal minimum, no qualifying dependent, etc.)
+- A case may additionally be flagged **"Needs Verification"** if the secondary ML model disagrees with the rules engine, or if income is far outside the range the ML model was trained on — this is a manual-review flag, not a third eligibility outcome
 
 ### 3. Download Report
 - Click "Download PDF Report" button
-- Save professionally formatted questionnaire
-- Includes eligibility result and recommendations
+- Save professionally formatted, government-form-styled report
 
 ## RA 11861 Benefits (When Eligible)
 
-- 💰 **Monthly Subsidy:** ₱1,500 per child
-- 🛍️ **VAT Exemption:** Tax benefits on goods/services
-- 📚 **Educational Support:** Scholarships and school assistance
-- 🏛️ **Priority Services:** Access to government assistance
+Each benefit below is independently gated by its own condition in `rules.json` — being eligible as a solo parent does not automatically grant all six:
+
+- 💰 **Cash Subsidy (Sec. 15a):** ₱1,000/month per solo parent (not per child), for those earning minimum wage or below, subject to fund availability
+- 🛍️ **VAT Discount/Exemption (Sec. 15b):** 10% discount and VAT exemption on baby's milk, food, micronutrient supplements, sanitary diapers, and prescribed medicines/vaccines, for children aged 0–6, for solo parents earning under ₱250,000/year
+- 🏥 **PhilHealth/NHIP Automatic Coverage (Sec. 15c):** for solo parents not already a formal PhilHealth member
+- 💼 **Livelihood/Employment Priority (Sec. 15d):** for solo parents who are unemployed or part-time
+- 🏛️ **Housing Priority (Sec. 15e):** for solo parents below the poverty line
+- 📚 **Educational Support (Sec. 9):** for solo parents with a dependent currently enrolled in school
 
 ## Assessment Criteria
 
-**Eligibility Requirements:**
-- Valid solo parent status (widowed, abandoned, separated, or single parent)
-- At least 1 dependent child
-- Family income below threshold (~₱30,000 + ₱5,000 per child)
-- Age 18 or older
+**Eligibility Requirements** (all decided by `rules.json`/`engine.py`, not hardcoded in `app.py`):
+- A recognized solo-parent circumstance under RA 11861 (death of spouse, abandonment, legal/de facto separation, unmarried parent, spouse detained/incapacitated, annulment/nullity/divorce, guardian/adoptive/foster parent, relative caregiver, pregnant woman, OFW-related guardian)
+- For time-gated circumstances, the reported duration must meet the Revised IRR's minimum: abandonment/separation/relative-caregiver ≥ 6 months, spouse detention ≥ 3 months, OFW-related ≥ 12 months
+- At least 1 dependent
+- Applicant is 18 or older
+
+There is no blanket income cutoff for eligibility itself — income only gates which *specific benefits* (cash subsidy, VAT discount, housing priority) apply, per the thresholds above.
 
 ## Algorithm Assessment
 
-The current training script is built to compare multiple tabular classifiers on the same solo parent dataset. In a quick benchmark on the held-out test split, Random Forest and Gradient Boosting were tied for the best results, both reaching about 99.4% accuracy with 100% recall on eligible cases. That makes Random Forest a strong production default for this version because it is already integrated, stable on small tabular data, and easy to retrain.
+`train_model_fixed.py` compares Decision Tree, Random Forest, and Logistic Regression (the three algorithms actually used in this project) on `data/solo_parent_dataset.csv`, tunes each via grid search, and selects the best performer that also meaningfully uses `Monthly_Income` in its decision (a safety check against a model that ignores income entirely). Run it to see current metrics:
 
-Recommended model order for this dataset:
-- Random Forest Classifier
-- Gradient Boosting Classifier
-- Extra Trees Classifier
-- Support Vector Machine
-- Logistic Regression
+```bash
+python train_model_fixed.py
+```
 
-For this project, prioritize recall for eligible applicants first, then precision, because missing a truly eligible solo parent is the more serious error.
+Note: this ML model is a **secondary confidence signal only** — actual eligibility decisions come from `engine.py`/`rules.json`, not the model. See `assess_eligibility_ml()` and `assess_eligibility()` in `app.py`.
 
 ## Future Enhancements
 
@@ -182,16 +182,10 @@ For this project, prioritize recall for eligible applicants first, then precisio
 
 This project is open-source and available under the MIT License.
 
-## Support
-
-For issues or questions, please create an issue in the GitHub repository or contact the development team.
-
 ## Disclaimer
 
 This is an automated assessment tool based on RA 11861 criteria. Final determination of eligibility is made by the Department of Social Welfare and Development (DSWD) upon submission of complete documents and verification interview.
 
 ---
 
-**Version:** 1.0.0  
-**Last Updated:** May 2026  
 **Status:** Active Development

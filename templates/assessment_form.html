@@ -116,13 +116,17 @@
                             </div>
 
                             <div class="row">
-                                <div class="col-md-6 mb-3">
+                                <div class="col-md-4 mb-3">
                                     <label for="employer_name" class="form-label">Name of Employer/Company</label>
                                     <input type="text" class="form-control capitalize-input" id="employer_name" name="employer_name">
                                 </div>
-                                <div class="col-md-6 mb-3">
+                                <div class="col-md-4 mb-3">
+                                    <label for="religion" class="form-label">Religion</label>
+                                    <input type="text" class="form-control capitalize-input" id="religion" name="religion">
+                                </div>
+                                <div class="col-md-4 mb-3">
                                     <label for="monthly_income" class="form-label">Monthly Income (PHP) <span class="text-danger">*</span></label>
-                                    <input type="number" class="form-control numeric-only" id="monthly_income" name="monthly_income" min="0" step="1" placeholder="e.g., 15000" inputmode="numeric" required>
+                                    <input type="text" class="form-control currency-input" id="monthly_income" name="monthly_income" placeholder="e.g., 15,000" inputmode="numeric" required>
                                 </div>
                             </div>
                         </div>
@@ -130,19 +134,20 @@
                         <!-- SECTION II: FAMILY COMPOSITION -->
                         <div class="form-section mb-5">
                             <h5 class="section-title">II. FAMILY COMPOSITION</h5>
-                            <p class="text-muted small mb-3">List all members of the household, including yourself</p>
+                            <p class="text-muted small mb-3">List all members of the household</p>
 
                             <div class="table-responsive mb-3">
                                 <table class="table table-bordered table-sm" id="familyTable">
                                     <thead class="table-light">
                                         <tr>
-                                            <th style="width: 18%">Name</th>
-                                            <th style="width: 12%">Relationship</th>
-                                            <th style="width: 12%">Birthday</th>
-                                            <th style="width: 10%">Age</th>
-                                            <th style="width: 12%">Civil Status</th>
-                                            <th style="width: 15%">Education</th>
-                                            <th style="width: 15%">Occupation/Income</th>
+                                            <th style="width: 15%">Name</th>
+                                            <th style="width: 10%">Relationship</th>
+                                            <th style="width: 10%">Birthday</th>
+                                            <th style="width: 7%">Age</th>
+                                            <th style="width: 10%">Civil Status</th>
+                                            <th style="width: 12%">Education</th>
+                                            <th style="width: 14%">Occupation</th>
+                                            <th style="width: 16%">Income (PHP)</th>
                                             <th style="width: 6%">Action</th>
                                         </tr>
                                     </thead>
@@ -157,7 +162,7 @@
                             <div class="row">
                                 <div class="col-md-6">
                                     <label for="total_family_income" class="form-label">Total Family Income (PHP) <span class="text-danger">*</span></label>
-                                    <input type="number" class="form-control numeric-only" id="total_family_income" name="total_family_income" min="0" step="1" placeholder="Sum of all family income" inputmode="numeric" required>
+                                    <input type="text" class="form-control" id="total_family_income" name="total_family_income" inputmode="numeric" readonly required>
                                 </div>
                             </div>
                         </div>
@@ -168,7 +173,8 @@
 
                             <div class="mb-3">
                                 <label class="form-label">Reason for Being a Solo Parent <span class="text-danger">*</span></label>
-                                <div>
+                                <div id="soloParentReasonNote" class="alert alert-info small py-2 px-3 mb-2 d-none"></div>
+                                <div class="form-check-group-2col">
                                     <div class="form-check">
                                         <input class="form-check-input" type="radio" name="solo_parent_status" id="reason_widowed" value="widowed" required>
                                         <label class="form-check-label" for="reason_widowed">
@@ -184,7 +190,7 @@
                                     <div class="form-check">
                                         <input class="form-check-input" type="radio" name="solo_parent_status" id="reason_separated" value="separated_divorced" required>
                                         <label class="form-check-label" for="reason_separated">
-                                            Legally Separated / Divorced
+                                            Legally Separated
                                         </label>
                                     </div>
                                     <div class="form-check">
@@ -270,7 +276,61 @@
 
                             <div class="mb-3">
                                 <label for="solo_parent_reason" class="form-label">Additional Details/Circumstances</label>
-                                <textarea class="form-control capitalize-input" id="solo_parent_reason" name="solo_parent_reason" rows="3" placeholder="Provide additional information about your situation (optional)"></textarea>
+                                <textarea class="form-control sentence-case-input" id="solo_parent_reason" name="solo_parent_reason" rows="3" placeholder="Provide additional information about your situation (optional)"></textarea>
+                            </div>
+                        </div>
+
+                        <!-- SECTION IV: BENEFIT SCREENING -->
+                        <div class="form-section mb-5">
+                            <h5 class="section-title">IV. BENEFIT SCREENING</h5>
+                            <p class="text-muted small mb-3">These determine which specific RA 11861 benefits you may qualify for.</p>
+
+                            <div class="mb-3">
+                                <label for="youngest_child_age" class="form-label">Age of Youngest Dependent Child <span class="text-danger">*</span></label>
+                                <input type="number" class="form-control" id="youngest_child_age" name="youngest_child_age" min="-1" max="99" step="1" inputmode="numeric" required>
+                                <small class="text-muted">Enter -1 if the child is unborn (pregnancy category).</small>
+                            </div>
+
+                            <div class="mb-3">
+                                <label class="form-label">Are you currently receiving other government cash assistance (e.g., 4Ps/Pantawid)? <span class="text-danger">*</span></label>
+                                <div>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="radio" name="receiving_other_govt_cash_aid" id="govt_aid_yes" value="Yes" required>
+                                        <label class="form-check-label" for="govt_aid_yes">Yes</label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="radio" name="receiving_other_govt_cash_aid" id="govt_aid_no" value="No" required>
+                                        <label class="form-check-label" for="govt_aid_no">No</label>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="mb-3">
+                                <label class="form-label">Are you already a formal/direct PhilHealth member (e.g., through formal employment, OFW, or voluntary paying membership)? <span class="text-danger">*</span></label>
+                                <div>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="radio" name="formal_philhealth_member" id="philhealth_yes" value="Yes" required>
+                                        <label class="form-check-label" for="philhealth_yes">Yes</label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="radio" name="formal_philhealth_member" id="philhealth_no" value="No" required>
+                                        <label class="form-check-label" for="philhealth_no">No</label>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="mb-3">
+                                <label class="form-label">Is at least one of your dependents currently enrolled in school? <span class="text-danger">*</span></label>
+                                <div>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="radio" name="dependent_currently_studying" id="studying_yes" value="Yes" required>
+                                        <label class="form-check-label" for="studying_yes">Yes</label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="radio" name="dependent_currently_studying" id="studying_no" value="No" required>
+                                        <label class="form-check-label" for="studying_no">No</label>
+                                    </div>
+                                </div>
                             </div>
                         </div>
 
@@ -339,24 +399,60 @@
         display: grid;
         gap: 0.5rem;
     }
+
+    .form-check-group-2col {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 0.5rem 1.5rem;
+    }
+
+    @media (max-width: 576px) {
+        .form-check-group-2col {
+            grid-template-columns: 1fr;
+        }
+    }
+
+    .form-check-input:disabled ~ .form-check-label {
+        color: #adb5bd;
+    }
 </style>
 
 <script>
     document.addEventListener('DOMContentLoaded', function() {
+        const mainBirthday = document.getElementById('birthday');
+        mainBirthday.min = '1900-01-01';
+        mainBirthday.max = getTodayStr();
+
         addFamilyMemberRow();
         document.getElementById('addFamilyMemberBtn').addEventListener('click', function() {
             addFamilyMemberRow();
         });
 
         bindCapitalizeHandlers(document);
+        bindSentenceCaseHandlers(document);
         bindNumericHandlers(document);
+        bindCurrencyHandlers(document);
 
         document.querySelectorAll('input[name="solo_parent_status"]').forEach(function(radio) {
             radio.addEventListener('change', toggleCategoryFollowUp);
         });
 
-        toggleCategoryFollowUp();
+        document.querySelectorAll('input[name="civil_status"]').forEach(function(radio) {
+            radio.addEventListener('change', applyCivilStatusGate);
+        });
+
+        applyCivilStatusGate();
+
+        document.getElementById('familyMembers').addEventListener('input', function(e) {
+            if (e.target.name && e.target.name.startsWith('family_income_')) {
+                recalculateTotalFamilyIncome();
+            }
+        });
     });
+
+    function getTodayStr() {
+        return new Date().toISOString().split('T')[0];
+    }
 
     function toTitleCase(text) {
         return text.replace(/\b\w+/g, function(word) {
@@ -376,6 +472,32 @@
         });
     }
 
+    // Sentence case: capitalize only the first letter of the text and the
+    // first letter after each sentence-ending ". "/"! "/"? " — everything
+    // else lowercase. Used for free-text/paragraph fields (e.g. "Additional
+    // Details/Circumstances"), where Title Case would wrongly capitalize
+    // every word of a written-out sentence.
+    function toSentenceCase(text) {
+        text = text.toLowerCase();
+        return text.replace(/(^\s*[a-z])|([.!?]\s+[a-z])/g, function(match) {
+            return match.toUpperCase();
+        });
+    }
+
+    function bindSentenceCaseHandlers(scope) {
+        scope.querySelectorAll('.sentence-case-input').forEach(function(input) {
+            if (input.dataset.sentBound === '1') {
+                return;
+            }
+            input.dataset.sentBound = '1';
+            input.addEventListener('input', function() {
+                const cursorPos = this.selectionStart;
+                this.value = toSentenceCase(this.value);
+                this.selectionStart = this.selectionEnd = cursorPos;
+            });
+        });
+    }
+
     function bindNumericHandlers(scope) {
         scope.querySelectorAll('.numeric-only').forEach(function(input) {
             if (input.dataset.numBound === '1') {
@@ -388,12 +510,99 @@
         });
     }
 
+    // Strips everything but digits, returning the plain number string
+    // (no thousands separators) — this is what actually gets parsed
+    // server-side, the commas are purely a live display aid.
+    function digitsOnly(value) {
+        return (value || '').replace(/[^0-9]/g, '');
+    }
+
+    function formatCurrencyDigits(digits) {
+        if (!digits) return '';
+        return Number(digits).toLocaleString('en-US');
+    }
+
+    // Live comma formatting for currency fields (e.g. "5000000" ->
+    // "5,000,000" as you type). Plain type="number" inputs can't display
+    // commas at all — if one ever received a comma-formatted value (paste,
+    // autofill, some mobile keyboards), the whole value becomes invalid and
+    // silently resets to empty, which the backend then reads as ₱0. Using
+    // a formatted text input avoids that trap entirely.
+    function bindCurrencyHandlers(scope) {
+        scope.querySelectorAll('.currency-input').forEach(function(input) {
+            if (input.dataset.currBound === '1') {
+                return;
+            }
+            input.dataset.currBound = '1';
+            input.addEventListener('input', function() {
+                const distanceFromEnd = this.value.length - this.selectionStart;
+                this.value = formatCurrencyDigits(digitsOnly(this.value));
+                const newPos = Math.max(0, this.value.length - distanceFromEnd);
+                this.selectionStart = this.selectionEnd = newPos;
+            });
+        });
+    }
+
+    // A marriage that ended by annulment/nullity or by divorce can only be
+    // reported as "Annulled / Nullified Marriage" here — other reasons
+    // (Widowed, Abandoned, Legally Separated, etc.) describe a different
+    // way the marriage ended/exists and are mutually exclusive with it.
+    const SOLO_PARENT_REASON_LABELS = {
+        'widowed': 'Widowed (Death of Spouse)',
+        'abandoned': 'Abandoned by Spouse',
+        'separated_divorced': 'Legally Separated',
+        'single_parent_unmarried': 'Single Parent (Unmarried)',
+        'spouse_detained_convicted': 'Spouse Detained / Convicted',
+        'spouse_incapacitated_medical': 'Spouse Incapacitated (Medical)',
+        'annulled_nullified_marriage': 'Annulled / Nullified Marriage',
+        'guardian_adoptive_foster_parent': 'Guardian / Adoptive / Foster Parent',
+        'relative_caregiver_4th_degree': 'Relative Caregiver (Up to 4th Degree)',
+        'solo_grandparent_caregiver': 'Solo Grandparent Caregiver',
+        'pregnant_woman_unborn_child': 'Pregnant Woman (Unborn Child)',
+        'ofw_related_guardian': 'OFW-Related Guardian'
+    };
+
+    // Civil statuses that rule out specific "Reason for Being a Solo
+    // Parent" options, while leaving every other reason free to choose
+    // (e.g. a currently Married applicant can't also be "Widowed" or have
+    // an "Annulled / Nullified Marriage"). Annulled/Divorced applicants are
+    // NOT restricted here — all reasons remain selectable for them.
+    const CIVIL_STATUS_DISALLOWS = {
+        'married': ['annulled_nullified_marriage', 'widowed']
+    };
+
+    function applyCivilStatusGate() {
+        const civilStatusInput = document.querySelector('input[name="civil_status"]:checked');
+        const civilStatus = civilStatusInput ? civilStatusInput.value : '';
+        const disallows = CIVIL_STATUS_DISALLOWS[civilStatus] || [];
+        const note = document.getElementById('soloParentReasonNote');
+
+        document.querySelectorAll('input[name="solo_parent_status"]').forEach(function(radio) {
+            const isAllowed = disallows.indexOf(radio.value) === -1;
+            radio.disabled = !isAllowed;
+            if (!isAllowed && radio.checked) {
+                radio.checked = false;
+            }
+        });
+
+        if (disallows.length) {
+            const disallowedLabels = disallows.map(function(v) { return SOLO_PARENT_REASON_LABELS[v]; }).join('", "');
+            note.textContent = 'Since your civil status is "' + toTitleCase(civilStatus) + '": "' + disallowedLabels + '" ' + (disallows.length > 1 ? 'do' : 'does') + ' not apply as your reason for being a solo parent.';
+            note.classList.remove('d-none');
+        } else {
+            note.classList.add('d-none');
+        }
+
+        toggleCategoryFollowUp();
+    }
+
     function toggleCategoryFollowUp() {
         const followUpQuestions = {
             'abandoned': 'How long has your spouse been absent?',
             'separated_divorced': 'How long have you been separated from your spouse?',
             'ofw_related_guardian': 'How many months has the OFW been continuously abroad?',
             'relative_caregiver_4th_degree': 'How long have the parents been absent or unable to care for the child?',
+            'solo_grandparent_caregiver': 'How long have you been the primary caregiver for your grandchild (i.e. how long have the parents been absent or unable to care for them)?',
             'spouse_detained_convicted': 'How many months has your spouse been detained or serving sentence?'
         };
 
@@ -433,10 +642,10 @@
                     <option value="Other">Other</option>
                 </select>
             </td>
-            <td><input type="date" class="form-control form-control-sm" name="family_birthday_${rowIndex}" onchange="calculateAge(this, ${rowIndex})"></td>
+            <td><input type="date" class="form-control form-control-sm" name="family_birthday_${rowIndex}" min="1900-01-01" max="${getTodayStr()}" onchange="calculateAge(this, ${rowIndex})" required></td>
             <td><input type="number" class="form-control form-control-sm numeric-only" id="age_${rowIndex}" name="family_age_${rowIndex}" min="0" step="1" placeholder="Age" readonly></td>
             <td>
-                <select class="form-select form-select-sm" name="family_civil_status_${rowIndex}">
+                <select class="form-select form-select-sm" name="family_civil_status_${rowIndex}" required>
                     <option value="">Select</option>
                     <option value="Single">Single</option>
                     <option value="Married">Married</option>
@@ -444,7 +653,7 @@
                 </select>
             </td>
             <td>
-                <select class="form-select form-select-sm" name="family_educ_${rowIndex}">
+                <select class="form-select form-select-sm" name="family_educ_${rowIndex}" required>
                     <option value="">Select</option>
                     <option value="Pre-school">Pre-school</option>
                     <option value="Elementary">Elementary</option>
@@ -454,12 +663,30 @@
                     <option value="N/A">N/A</option>
                 </select>
             </td>
-            <td><input type="text" class="form-control form-control-sm capitalize-input" name="family_occupation_${rowIndex}" placeholder="Occupation/Income"></td>
+            <td><input type="text" class="form-control form-control-sm capitalize-input" name="family_occupation_${rowIndex}" placeholder="Occupation" required></td>
+            <td><input type="text" class="form-control form-control-sm currency-input" name="family_income_${rowIndex}" inputmode="numeric" placeholder="0" required></td>
             <td><button type="button" class="btn-remove" onclick="removeRow(this)"><i class="fas fa-trash"></i></button></td>
         `;
         tbody.appendChild(row);
         bindCapitalizeHandlers(row);
         bindNumericHandlers(row);
+        bindCurrencyHandlers(row);
+        recalculateTotalFamilyIncome();
+    }
+
+    function recalculateTotalFamilyIncome() {
+        // Total Family Income counts only the family composition table's
+        // income entries — the applicant's own Monthly Income (Section I)
+        // is tracked separately and is not added in here. Uses digitsOnly()
+        // rather than parseFloat() directly, since parseFloat("1,000,000")
+        // stops at the first comma and returns just 1 — silently wrong.
+        let total = 0;
+
+        document.querySelectorAll('#familyMembers input[name^="family_income_"]').forEach(function(input) {
+            total += Number(digitsOnly(input.value)) || 0;
+        });
+
+        document.getElementById('total_family_income').value = formatCurrencyDigits(String(total));
     }
 
     function calculateAge(dateInput, rowIndex) {
@@ -480,6 +707,7 @@
     function removeRow(button) {
         const row = button.closest('tr');
         row.remove();
+        recalculateTotalFamilyIncome();
     }
 </script>
 {% endblock %}

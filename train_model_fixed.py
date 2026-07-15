@@ -1,19 +1,29 @@
 """
-Solo Parent DSS - ML Model Training (Comprehensive Pipeline Version)
+Solo Parent DSS - ML Model Training (Primary Comparison: DT / RF / LogReg)
 
-This script trains and tunes multiple candidate classifiers on the solo parent
-dataset using modular preprocessing pipelines, performs probability calibration,
-and saves the self-contained pipeline for production use.
+This is the PRIMARY training script, matching the methodology described in
+Chapter 3 ("Algorithm Evaluation Procedure" and "Phase 5: Model Building"):
+Decision Tree, Random Forest, and Logistic Regression are trained and tuned
+on the same dataset using modular preprocessing pipelines, evaluated head to
+head, and the best-performing model is calibrated and saved as the
+production pipeline.
+
+For the supplementary comparison against GradientBoostingClassifier,
+ExtraTreesClassifier, and SVC (outside this study's documented algorithm
+scope), see appendix_algorithm_comparison.py. That script is NOT wired into
+app.py and exists only to document that the additional candidates were
+considered and did not outperform the three algorithms actually used here.
 """
+
 
 import warnings
 import os
 import joblib
 import numpy as np
 import pandas as pd
-from sklearn.ensemble import ExtraTreesClassifier, GradientBoostingClassifier, RandomForestClassifier
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.svm import SVC
+from sklearn.tree import DecisionTreeClassifier
 from sklearn.metrics import accuracy_score, confusion_matrix, f1_score, precision_score, recall_score
 from sklearn.model_selection import StratifiedKFold, GridSearchCV, train_test_split
 from sklearn.preprocessing import OneHotEncoder, OrdinalEncoder, StandardScaler
@@ -24,7 +34,7 @@ from sklearn.calibration import CalibratedClassifierCV
 warnings.filterwarnings('ignore')
 
 print("=" * 80)
-print("SOLO PARENT DSS - ML MODEL TRAINING (PIPELINE VERSION)")
+print("SOLO PARENT DSS - ML MODEL TRAINING (PRIMARY: DT / RF / LOGREG)")
 print("=" * 80)
 
 # ============================================================================
@@ -171,35 +181,15 @@ candidate_configs = {
             'classifier__min_samples_split': [2, 5]
         }
     ),
-    'GradientBoostingClassifier': (
+    'DecisionTreeClassifier': (
         Pipeline([
             ('preprocessor', tree_preprocessor),
-            ('classifier', GradientBoostingClassifier(random_state=42))
+            ('classifier', DecisionTreeClassifier(random_state=42, class_weight='balanced'))
         ]),
         {
-            'classifier__n_estimators': [50, 100],
-            'classifier__learning_rate': [0.05, 0.1, 0.2],
-            'classifier__max_depth': [3, 5]
-        }
-    ),
-    'ExtraTreesClassifier': (
-        Pipeline([
-            ('preprocessor', tree_preprocessor),
-            ('classifier', ExtraTreesClassifier(random_state=42, class_weight='balanced'))
-        ]),
-        {
-            'classifier__n_estimators': [50, 100, 200],
-            'classifier__max_depth': [None, 5, 10]
-        }
-    ),
-    'SVC': (
-        Pipeline([
-            ('preprocessor', linear_preprocessor),
-            ('classifier', SVC(probability=True, class_weight='balanced', random_state=42))
-        ]),
-        {
-            'classifier__C': [0.1, 1, 10],
-            'classifier__kernel': ['rbf', 'linear']
+            'classifier__max_depth': [3, 5, 8, None],
+            'classifier__min_samples_split': [2, 5, 10],
+            'classifier__min_samples_leaf': [1, 5, 10]
         }
     ),
     'LogisticRegression': (
@@ -263,13 +253,94 @@ ranked_results = sorted(
     reverse=True
 )
 
-best_config = ranked_results[0]
+# ============================================================================
+# STEP 5b: INCOME-USAGE SAFETY CHECK
+# ============================================================================
+# A model can score well on accuracy/precision/recall/F1 while structurally
+# never using Monthly_Income at all — e.g. a shallow Decision Tree whose
+# first few splits on Number_of_Dependents/Type_of_Solo_Parent/Civil_Status
+# already separate the training data well enough that income is never
+# reached. That model would then treat a minimum-wage applicant and a
+# millionaire identically, which is a real problem for an income-tested
+# government benefits screener even if the headline metrics look fine.
+# This step verifies each candidate actually relies on Monthly_Income to
+# some non-trivial degree before it's eligible to be selected.
+print("\n[STEP 5b] Income-Usage Safety Check...")
+print("  Verifying each candidate actually uses Monthly_Income before it can be")
+print("  selected for production, regardless of how well it scores otherwise...")
+
+MIN_INCOME_IMPORTANCE = 0.01  # require >=1% relative importance/weight on income
+
+
+def get_income_importance(pipeline):
+    """Returns how much a fitted pipeline relies on Monthly_Income, as a
+    fraction of total feature importance (tree models) or total absolute
+    coefficient weight (linear models). Returns None if the classifier
+    type isn't recognized, so the caller can flag it for manual review
+    rather than silently assuming it's fine."""
+    preprocessor = pipeline.named_steps['preprocessor']
+    classifier = pipeline.named_steps['classifier']
+    feature_names = list(preprocessor.get_feature_names_out())
+    income_indices = [i for i, name in enumerate(feature_names) if 'Monthly_Income' in name]
+    if not income_indices:
+        return 0.0
+
+    if hasattr(classifier, 'feature_importances_'):
+        importances = classifier.feature_importances_
+        total = float(importances.sum())
+        if total == 0:
+            return 0.0
+        return float(sum(importances[i] for i in income_indices)) / total
+    elif hasattr(classifier, 'coef_'):
+        coefs = classifier.coef_[0]
+        total_abs = float(sum(abs(c) for c in coefs))
+        if total_abs == 0:
+            return 0.0
+        return float(sum(abs(coefs[i]) for i in income_indices)) / total_abs
+    else:
+        return None
+
+
+for item in benchmark_results:
+    income_importance = get_income_importance(item['pipeline'])
+    item['income_importance'] = income_importance
+    item['income_check_passed'] = (
+        income_importance is not None and income_importance >= MIN_INCOME_IMPORTANCE
+    )
+    status = "PASS" if item['income_check_passed'] else "FAIL"
+    imp_str = f"{income_importance:.1%}" if income_importance is not None else "UNKNOWN"
+    print(f"    [{status}] {item['model_name']}: Monthly_Income importance = {imp_str}")
+
+# Select the best-ranked model that ALSO passes the income-usage check —
+# not just the top of the raw performance ranking.
+selected_candidate = next(
+    (item for item in ranked_results if item['income_check_passed']),
+    None
+)
+
+if selected_candidate is None:
+    print("  [WARNING] No candidate meaningfully uses Monthly_Income. Falling back to the")
+    print("            top-ranked model anyway, but this should be investigated further —")
+    print("            income-based screening is a real requirement under RA 11861 Sec. 33.")
+    selected_candidate = ranked_results[0]
+elif selected_candidate is not ranked_results[0]:
+    skipped = ranked_results[0]
+    print(f"  [OVERRIDE] {skipped['model_name']} ranked highest on accuracy/F1 "
+          f"(income importance={skipped.get('income_importance', 0) or 0:.1%}) but failed the "
+          f"income-usage check.")
+    print(f"             Selecting {selected_candidate['model_name']} instead — it passes both "
+          f"the performance ranking and the income-usage safety check.")
+else:
+    print(f"  [OK] Top-ranked model also passes the income-usage check — no override needed.")
+
+best_config = selected_candidate
 best_pipeline = best_config['pipeline']
 selected_model_name = best_config['model_name']
 
 print(f"\n  [SELECTED] {selected_model_name} as the production model candidate.")
 
 # ============================================================================
+
 # STEP 6: PROBABILITY CALIBRATION
 # ============================================================================
 print("\n[STEP 6] Calibrating Probabilities for Selected Model...")
@@ -322,7 +393,7 @@ joblib.dump(feature_columns, 'model/feature_columns.pkl')
 # Save model metadata
 metadata = {
     'model_type': selected_model_name,
-    'model_version': '4.0_modular_pipeline',
+    'model_version': '5.0_primary_dt_rf_logreg',
     'training_date': pd.Timestamp.now().isoformat(),
     'selected_algorithm': selected_model_name,
     'feature_columns': feature_columns,
@@ -343,10 +414,18 @@ metadata = {
             'precision': item['precision'],
             'recall': item['recall'],
             'f1': item['f1'],
-            'confusion_matrix': item['confusion_matrix']
+            'confusion_matrix': item['confusion_matrix'],
+            'income_importance': item.get('income_importance'),
+            'income_check_passed': item.get('income_check_passed')
         }
         for item in ranked_results
-    ]
+    ],
+    'income_usage_safety_check': {
+        'min_income_importance_required': MIN_INCOME_IMPORTANCE,
+        'selected_model_income_importance': best_config.get('income_importance'),
+        'top_ranked_model_by_metrics_alone': ranked_results[0]['model_name'],
+        'override_applied': selected_candidate is not ranked_results[0]
+    }
 }
 joblib.dump(metadata, 'model/model_metadata.pkl')
 
@@ -357,4 +436,3 @@ print("  [OK] Metadata saved to: model/model_metadata.pkl")
 print("\n" + "=" * 80)
 print("TRAINING & TUNING COMPLETED SUCCESSFULLY")
 print("=" * 80)
-    

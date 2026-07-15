@@ -5,13 +5,27 @@ from app import app, assess_eligibility
 
 client = app.test_client()
 
+
+def with_engine_fields(data, youngest_child_age='5'):
+    """Fills in the Section IV fields engine.evaluate() requires
+    (added when app.py was unified onto rules.json/engine.py), defaulted
+    to values that don't themselves grant/deny anything, so each test case
+    above stays focused on the field(s) it's actually exercising."""
+    data = dict(data)
+    data.setdefault('youngest_child_age', youngest_child_age)
+    data.setdefault('receiving_other_govt_cash_aid', 'No')
+    data.setdefault('formal_philhealth_member', 'No')
+    data.setdefault('dependent_currently_studying', 'No')
+    return data
+
+
 def run_test_cases():
     print("=" * 80)
     print("RUNNING AUTOMATED ELIGIBILITY & DYNAMIC BENEFITS TESTS")
     print("=" * 80)
 
     # Test Case 1: Low-Income Solo Parent
-    case_low = {
+    case_low = with_engine_fields({
         'first_name': 'Carmela',
         'middle_name': 'R',
         'surname': 'Reyes',
@@ -23,19 +37,17 @@ def run_test_cases():
         'occupation': 'Unemployed',
         'monthly_income': '1508',
         'total_family_income': '1508',
-        'solo_parent_status': 'single',
+        'solo_parent_status': 'single_parent_unmarried',
         'number_of_dependent_children': '2',
         'with_pwd': 'No'
-    }
+    })
 
-    # Test Case 2: Borderline Income Solo Parent
-    # NOTE: income updated to PHP 18,000/month. The old value (42,000) no
-    # longer lands in the "borderline/pending verification" tier now that
-    # app.py uses the real RA 11861 thresholds (minimum wage ~15,860/month
-    # and the PHP 250,000/year VAT-exemption cap, ~20,833/month) instead of
-    # the old made-up ~30,000-45,000 range. 18,000 sits between the two real
-    # thresholds, so it correctly triggers "needs_verification".
-    case_borderline = {
+    # Test Case 2: Borderline Income Solo Parent (between the minimum-wage
+    # subsidy cutoff and the PHP 250,000/year VAT-exemption cap defined in
+    # rules.json) — under the current model there's no separate "pending
+    # verification" tier; this just checks the cash subsidy correctly drops
+    # out while VAT/other benefits remain.
+    case_borderline = with_engine_fields({
         'first_name': 'Maria',
         'middle_name': 'B',
         'surname': 'Santos',
@@ -47,13 +59,14 @@ def run_test_cases():
         'occupation': 'Employed',
         'monthly_income': '18000',
         'total_family_income': '18000',
-        'solo_parent_status': 'separated',
+        'solo_parent_status': 'separated_divorced',
+        'category_duration_answer': '12',
         'number_of_dependent_children': '2',
         'with_pwd': 'No'
-    }
+    })
 
     # Test Case 3: High-Income Solo Parent
-    case_high = {
+    case_high = with_engine_fields({
         'first_name': 'Dominic',
         'middle_name': 'A',
         'surname': 'Villanueva',
@@ -65,13 +78,14 @@ def run_test_cases():
         'occupation': 'Self-Employed',
         'monthly_income': '60000',
         'total_family_income': '60000',
-        'solo_parent_status': 'separated',
+        'solo_parent_status': 'separated_divorced',
+        'category_duration_answer': '12',
         'number_of_dependent_children': '2',
         'with_pwd': 'No'
-    }
+    })
 
-    # Test Case 4: Non-Eligible Parent
-    case_non_eligible = {
+    # Test Case 4: Non-Eligible Parent (zero dependents)
+    case_non_eligible = with_engine_fields({
         'first_name': 'Teresa',
         'middle_name': 'M',
         'surname': 'Aquino',
@@ -83,10 +97,10 @@ def run_test_cases():
         'occupation': 'Employed',
         'monthly_income': '10947',
         'total_family_income': '10947',
-        'solo_parent_status': 'single',
+        'solo_parent_status': 'single_parent_unmarried',
         'number_of_dependent_children': '0',
         'with_pwd': 'No'
-    }
+    }, youngest_child_age='')
 
     test_cases = [
         ("Low-Income Case", case_low),
@@ -114,7 +128,7 @@ def run_test_cases():
             print("Web Output: NOT ELIGIBLE")
 
         print("Web Output - Benefits Rendered:")
-        for benefit_name in ["Monthly Subsidy", "VAT Exemption", "Educational Assistance", "Housing Benefits", "Comprehensive Health Services", "Flexible Work Schedule"]:
+        for benefit_name in ["Cash Subsidy", "VAT Discount/Exemption", "PhilHealth", "Livelihood", "Housing Priority", "Educational Support"]:
             if benefit_name in html:
                 print(f"  - [FOUND] {benefit_name}")
             else:

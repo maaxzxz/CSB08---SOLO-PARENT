@@ -1,6 +1,5 @@
 from flask import Flask, render_template, request, send_file
 from datetime import datetime
-from reportlab.lib.pagesizes import A4, legal
 from reportlab.lib.units import inch
 from reportlab.lib import colors
 from reportlab.pdfgen import canvas
@@ -11,7 +10,7 @@ import os
 import textwrap
 import joblib
 import pandas as pd
-import numpy as np
+from engine import Applicant as RuleApplicant, evaluate as rule_engine_evaluate, RULES as ENGINE_RULES
 
 app = Flask(__name__)
 app.secret_key = 'solo-parent-dss-key'
@@ -36,65 +35,41 @@ try:
 except Exception:
     ml_model_metadata = {}
 
-# RA 11861 income thresholds (Section 33 of the Revised IRR, Sept 29 2022)
-# https://lawphil.net/statutes/repacts/ra2022/irr_8972_2022.html
-#
-# TODO: REGIONAL_MINIMUM_WAGE_MONTHLY must be updated to match the current
-# DOLE Regional Wage Order for your area of implementation — minimum wage
-# varies by region and changes periodically. The value below is a
-# placeholder estimate (assumes ~26 working days/month) and MUST be replaced
-# with the correct regional figure before this is used for real assessments.
-REGIONAL_MINIMUM_WAGE_MONTHLY = 15860  # PLACEHOLDER — replace with current regional wage order
-
-# Section 33(b): 10% discount + VAT exemption applies to solo parents who are
-# unemployed or earning under PHP 250,000/year. This figure is set by law
-# (subject to TRAIN Law adjustment), not an assumption.
-VAT_DISCOUNT_ANNUAL_CAP = 250000
-VAT_DISCOUNT_MONTHLY_CAP = VAT_DISCOUNT_ANNUAL_CAP / 12  # ~20,833.33
+# Eligibility and benefit thresholds (minimum wage, VAT-exemption income
+# cap, category duration minimums, etc.) all live in rules.json now — see
+# engine.py's evaluate(), which app.py's assess_eligibility() calls into.
+# Nothing in app.py should hardcode a legal threshold; if a number needs to
+# change, change it in rules.json.
 
 # Independent income-outlier safety net — separate from both the ML model
-# and the rule-based check above. Neither was trained/validated on incomes
-# far outside the training dataset's actual range (data/solo_parent_dataset.csv
-# tops out at PHP 84,072/month), so their verdicts can't be trusted as
-# "confidently decided" for applicants far beyond that, even if the model
-# and the rules happen to agree. Update TRAINING_DATA_MAX_MONTHLY_INCOME if
-# the training dataset is regenerated with a different income range.
+# and the rules engine. Neither was trained/validated on incomes far outside
+# the training dataset's actual range (data/solo_parent_dataset.csv tops out
+# at PHP 84,072/month), so their verdicts can't be trusted as "confidently
+# decided" for applicants far beyond that, even if the model and the rules
+# happen to agree. Update TRAINING_DATA_MAX_MONTHLY_INCOME if the training
+# dataset is regenerated with a different income range.
 TRAINING_DATA_MAX_MONTHLY_INCOME = 84072
 INCOME_OUTLIER_MULTIPLE = 3
 INCOME_OUTLIER_THRESHOLD = TRAINING_DATA_MAX_MONTHLY_INCOME * INCOME_OUTLIER_MULTIPLE  # ~252,216
 
-# RA 11861 Defined Benefits
-BENEFITS = {
-    'monthly_subsidy': {
-        'name': 'Monthly Subsidy',
-        'description': 'PHP 1,500 cash assistance per child, subject to official guidelines'
-    },
-    'vat_exemption': {
-        'name': 'VAT Exemption & Discounts',
-        'description': '10% discount and VAT exemption on basic necessities and infant care products'
-    },
-    'educational_support': {
-        'name': 'Educational Assistance',
-        'description': 'Scholarship programs and school assistance for parent and children'
-    },
-    'housing_benefits': {
-        'name': 'Housing Benefits',
-        'description': 'Priority allocation in socialized and government housing projects'
-    },
-    'health_services': {
-        'name': 'Comprehensive Health Services',
-        'description': 'Discounts on medicines, medical supplies, and healthcare programs'
-    },
-    'flexible_work': {
-        'name': 'Flexible Work Schedule',
-        'description': '7 days of paid parental leave per year and flexible work hours'
-    }
+# Presentation-only explanatory text for rules.json's benefits, keyed by
+# each benefit's "id" field. This does NOT affect which benefits are
+# granted — that's decided entirely by engine.evaluate() from rules.json.
+# If rules.json gains a new benefit with no entry here, it still displays
+# fine with a generic "RA 11861 Sec. X" fallback (see assess_eligibility()).
+BENEFIT_DESCRIPTIONS = {
+    'cash_subsidy_sec15a': 'PHP 1,000 monthly cash subsidy per solo parent (not per child), subject to fund availability.',
+    'vat_discount_sec15b': "10% discount and VAT exemption on baby's milk, food, micronutrient supplements, sanitary diapers, and prescribed medicines/vaccines for children aged 0-6.",
+    'philhealth_coverage_sec15c': 'Automatic PhilHealth/NHIP coverage for solo parents not already formally covered.',
+    'livelihood_priority_sec15d': 'Priority access to livelihood, self-employment, and skills training programs.',
+    'housing_priority_sec15e': 'Priority allocation and liberal payment terms in government socialized housing projects.',
+    'educational_support_sec9': 'Full scholarship for one child, plus priority in UniFAST/tertiary education programs for other dependents.',
 }
 
 SOLO_PARENT_STATUS_LABELS = {
     'widowed': 'Widowed (Death of Spouse)',
     'abandoned': 'Abandoned by Spouse',
-    'separated_divorced': 'Legally Separated / Divorced',
+    'separated_divorced': 'Legally Separated',
     'single_parent_unmarried': 'Single Parent (Unmarried)',
     'spouse_detained_convicted': 'Spouse Detained / Convicted',
     'spouse_incapacitated_medical': 'Spouse Incapacitated (Medical)',
@@ -180,7 +155,35 @@ SOLO_PARENT_FOLLOW_UP_QUESTIONS = {
     'separated_divorced': 'How long have you been separated from your spouse?',
     'ofw_related_guardian': 'How many months has the OFW been continuously abroad?',
     'relative_caregiver_4th_degree': 'How long have the parents been absent or unable to care for the child?',
+    'solo_grandparent_caregiver': 'How long have you been the primary caregiver for your grandchild (i.e. how long have the parents been absent or unable to care for them)?',
     'spouse_detained_convicted': 'How many months has your spouse been detained or serving sentence?'
+}
+
+# Maps this form's solo_parent_status keys to the exact Type_of_Solo_Parent
+# category strings used by rules.json / engine.py (and by the training
+# dataset) — this is the single translation layer both the rules engine and
+# the ML feature extractor rely on, so it lives here once instead of being
+# duplicated. 'solo_grandparent_caregiver' intentionally maps to the same
+# category as 'relative_caregiver_4th_degree': under RA 11861 a grandparent
+# is a relative within the 4th civil degree, not a separate legal category,
+# and rules.json only defines the one entry (with its 6-month duration
+# minimum applying to both).
+TYPE_OF_SOLO_PARENT_MAP = {
+    'single_parent_unmarried': 'Unmarried parent who keeps and rears the child',
+    'widowed': 'Death of spouse',
+    'separated_divorced': 'Legal or de facto separation',
+    'abandoned': 'Abandonment by spouse',
+    'ofw_related_guardian': 'Spouse/family member/guardian of an OFW',
+    'annulled_nullified_marriage': 'Declaration of nullity, annulment, or divorce',
+    'spouse_detained_convicted': 'Detention of spouse (3+ months) or serving sentence',
+    'spouse_incapacitated_medical': 'Physical or mental incapacity of spouse',
+    'pregnant_woman_unborn_child': 'Pregnant woman solely responsible for unborn child',
+    'guardian_adoptive_foster_parent': 'Legal guardian, adoptive, or foster parent',
+    'relative_caregiver_4th_degree': 'Relative within 4th civil degree assuming care',
+    'solo_grandparent_caregiver': 'Relative within 4th civil degree assuming care',
+    # RA 11861 and rules.json also define this category, but the current
+    # form has no corresponding option:
+    # 'rape': 'Birth of child due to rape'
 }
 
 
@@ -208,6 +211,25 @@ def calculate_age(birthdate_str):
         return 0
 
 
+def parse_money(value):
+    """Parses a currency-style form value into a float, stripping thousands
+    separators first (e.g. "5,000,000" -> 5000000.0). Without this, a bare
+    float(value) call raises on any comma-formatted input and gets caught
+    by a bare except, silently defaulting to 0 — which previously made a
+    ₱5,000,000 income submission behave as if it were ₱0, incorrectly
+    skipping both the income-outlier check and the benefit-tier income
+    gating. Returns 0.0 for blank or otherwise unparseable input."""
+    if value is None:
+        return 0.0
+    text = str(value).replace(',', '').strip()
+    if not text:
+        return 0.0
+    try:
+        return float(text)
+    except ValueError:
+        return 0.0
+
+
 def parse_family_members(form_data):
     """Parse family members safely, even if rows are deleted"""
     family_members = []
@@ -224,6 +246,8 @@ def parse_family_members(form_data):
         name = form_data.get(f'family_name_{index}', '').strip()
 
         if name:
+            income = parse_money(form_data.get(f'family_income_{index}', 0))
+
             family_members.append({
                 'name': name,
                 'relationship': form_data.get(f'family_relationship_{index}', ''),
@@ -231,10 +255,22 @@ def parse_family_members(form_data):
                 'age': form_data.get(f'family_age_{index}', '0'),
                 'civil_status': form_data.get(f'family_civil_status_{index}', ''),
                 'education': form_data.get(f'family_educ_{index}', ''),
-                'occupation': form_data.get(f'family_occupation_{index}', '')
+                'occupation': form_data.get(f'family_occupation_{index}', ''),
+                'income': income
             })
 
     return family_members
+
+
+# Free-text "no occupation" synonyms applicants commonly write instead of
+# the literal word "unemployed" — previously only 'unemployed' and 'none'
+# were recognized, so e.g. "N/A" silently fell through to the 'Employed'
+# default below, which is exactly backwards for an unrecognized answer.
+NO_OCCUPATION_SYNONYMS = {
+    'unemployed', 'none', 'n/a', 'na', 'not applicable', 'nil', 'n a',
+    'wala', 'walang trabaho', 'walang hanapbuhay', 'no occupation',
+    'no work', 'no job', '-', '--', 'none.'
+}
 
 
 def infer_employment_status(occupation_text):
@@ -242,9 +278,9 @@ def infer_employment_status(occupation_text):
     if not occupation_text:
         return 'Unemployed'
 
-    occ = occupation_text.lower().strip()
+    occ = occupation_text.lower().strip().strip('.')
 
-    if occ == 'unemployed' or occ == 'none' or len(occ) == 0:
+    if occ in NO_OCCUPATION_SYNONYMS or len(occ) == 0:
         return 'Unemployed'
     elif any(word in occ for word in ['own', 'self', 'business', 'freelance', 'vendor']):
         return 'Self-Employed'
@@ -277,41 +313,14 @@ def extract_ml_features(form_data):
         age = 0
 
     # IMPORTANT: these values must match the exact Type_of_Solo_Parent strings
-    # used in data/solo_parent_dataset2.csv, or the encoder will treat every
-    # submission as an unseen category. If the front-end form's option list
-    # changes, this map must be updated to match.
-    # These strings must match EXACTLY what's in the Type_of_Solo_Parent
-    # column of data/solo_parent_dataset.csv (verified against the current
-    # training data below) or the encoder treats the submission as an unseen
-    # category and effectively throws the feature away.
+    # used in data/solo_parent_dataset.csv (and rules.json's category keys),
+    # or the encoder / rules engine will treat the submission as an unseen
+    # category. See TYPE_OF_SOLO_PARENT_MAP for the shared mapping.
     solo_parent_type = form_data.get('solo_parent_status', '').strip().lower()
-    solo_parent_map = {
-        'single_parent_unmarried': 'Unmarried parent who keeps and rears the child',
-        'widowed': 'Death of spouse',
-        'separated_divorced': 'Legal or de facto separation',
-        'abandoned': 'Abandonment by spouse',
-        'ofw_related_guardian': 'Spouse/family member/guardian of an OFW',
-        'annulled_nullified_marriage': 'Declaration of nullity, annulment, or divorce',
-        'spouse_detained_convicted': 'Detention of spouse (3+ months) or serving sentence',
-        'spouse_incapacitated_medical': 'Physical or mental incapacity of spouse',
-        'pregnant_woman_unborn_child': 'Pregnant woman solely responsible for unborn child',
-        'guardian_adoptive_foster_parent': 'Legal guardian, adoptive, or foster parent',
-        'relative_caregiver_4th_degree': 'Relative within 4th civil degree assuming care',
-        'solo_grandparent_caregiver': 'Relative within 4th civil degree assuming care',
-        # These categories exist in RA 11861 and in the training data, but the
-        # current form (as of this fix) has no corresponding option. Add form
-        # fields for these if/when the intake form is expanded:
-        # 'detained': 'Detention of spouse (3+ months) or serving sentence'
-        # 'incapacitated': 'Physical or mental incapacity of spouse'
-        # 'pregnant': 'Pregnant woman solely responsible for unborn child'
-        # 'guardian': 'Legal guardian, adoptive, or foster parent'
-        # 'relative': 'Relative within 4th civil degree assuming care'
-        # 'rape': 'Birth of child due to rape'
-    }
     # Fallback for a value the form didn't expect: use the most common
     # legitimate category rather than silently guessing. This should be rare
-    # once the form's option list matches the keys above.
-    mapped_type = solo_parent_map.get(solo_parent_type, 'Unmarried parent who keeps and rears the child')
+    # once the form's option list matches TYPE_OF_SOLO_PARENT_MAP's keys.
+    mapped_type = TYPE_OF_SOLO_PARENT_MAP.get(solo_parent_type, 'Unmarried parent who keeps and rears the child')
 
     gender_map = {'male': 'M', 'female': 'F'}
     mapped_gender = gender_map.get(form_data.get('sex', '').strip().lower(), 'F')
@@ -335,7 +344,7 @@ def extract_ml_features(form_data):
         'Civil_Status': mapped_civil_status,
         'Educational_Attainment': form_data.get('educational_attainment', '').strip() or 'Elementary',
         'Employment_Status': infer_employment_status(form_data.get('occupation', '')),
-        'Monthly_Income': float(form_data.get('monthly_income', 0) or 0),
+        'Monthly_Income': parse_money(form_data.get('monthly_income', 0)),
         'Number_of_Dependents': int(form_data.get('number_of_dependent_children', 0) or 0),
         'With_Minor': has_minor_dependents(family_members),
         'With_PWD': form_data.get('with_pwd', 'No'),
@@ -398,7 +407,7 @@ def assess_eligibility_ml(form_data):
                 else:
                     # Unseen category: fall back to the encoder's first known
                     # class so prediction can still run, but flag it — this
-                    # should be rare if solo_parent_map (above) is kept in
+                    # should be rare if TYPE_OF_SOLO_PARENT_MAP is kept in
                     # sync with the training data's category strings.
                     unseen_category_warnings.append(f"{col}='{raw_value}'")
                     feature_df.at[0, col] = encoder.transform([encoder.classes_[0]])[0]
@@ -479,15 +488,8 @@ def assess_eligibility(data):
     civil_status = data.get('civil_status', '')
     occupation = data.get('occupation', '').strip()
 
-    try:
-        monthly_income = float(data.get('monthly_income', 0))
-    except:
-        monthly_income = 0
-
-    try:
-        total_family_income = float(data.get('total_family_income', 0))
-    except:
-        total_family_income = 0
+    monthly_income = parse_money(data.get('monthly_income', 0))
+    total_family_income = parse_money(data.get('total_family_income', 0))
 
     solo_parent_status = data.get('solo_parent_status', '').strip().lower()
     status_specific_answer = data.get('category_duration_answer', '').strip()
@@ -544,74 +546,74 @@ def assess_eligibility(data):
 
     result['family_members'] = family_members
 
-    # RA 11861 Eligibility Criteria
-    has_valid_status = solo_parent_status in [
-        'widowed',
-        'abandoned',
-        'separated_divorced',
-        'single_parent_unmarried',
-        'ofw_related_guardian',
-        'annulled_nullified_marriage',
-        'spouse_detained_convicted',
-        'spouse_incapacitated_medical',
-        'guardian_adoptive_foster_parent',
-        'relative_caregiver_4th_degree',
-        'solo_grandparent_caregiver',
-        'pregnant_woman_unborn_child'
-    ]
+    # Eligibility and benefits are decided entirely by engine.evaluate(),
+    # which reads rules.json — the single source of truth shared with the
+    # client-side app in client/. This function's job is just translating
+    # this form's field names/values into the Applicant shape the engine
+    # expects; no eligibility thresholds or category lists live here.
+    rule_applicant = build_rule_engine_applicant(data, occupation=occupation,
+                                                  solo_parent_status=solo_parent_status,
+                                                  status_specific_answer=status_specific_answer,
+                                                  number_of_children=number_of_children,
+                                                  monthly_income=monthly_income)
+    engine_result = rule_engine_evaluate(rule_applicant)
 
-    # Basic eligibility check: must have valid status, minor/dependent children, and be an adult
-    if has_valid_status and number_of_children > 0 and age >= 18:
-        result['eligible'] = True
+    result['eligible'] = engine_result['eligibility'] == 'Eligible'
+    result['remarks'] = engine_result['remarks']
+    result['priority_level'] = engine_result['priority_level']
+    # The old borderline-income "pending verification" tier doesn't exist
+    # in rules.json's model (each benefit is a clean granted/not-granted
+    # boolean); needs_verification is now only set by the ML-conflict and
+    # income-outlier safety nets in submit_assessment().
+    result['needs_verification'] = False
 
-        # RA 11861 Sec. 33 defines two separate income tests, not one:
-        #   (a) minimum wage or below -> PHP 1,000/month cash subsidy
-        #   (b) unemployed or under PHP 250,000/year -> 10% discount + VAT exemption
-        # Health/education/housing/flexible-work benefits are not hard
-        # income-gated the same way, so they apply regardless of tier.
-        if total_family_income <= REGIONAL_MINIMUM_WAGE_MONTHLY:
-            # At or below minimum wage: qualifies for the full benefit set,
-            # including the cash subsidy.
-            result['benefits'] = [
-                BENEFITS['monthly_subsidy'],
-                BENEFITS['vat_exemption'],
-                BENEFITS['health_services'],
-                BENEFITS['educational_support'],
-                BENEFITS['housing_benefits'],
-                BENEFITS['flexible_work']
-            ]
-        elif total_family_income <= VAT_DISCOUNT_MONTHLY_CAP:
-            # Above minimum wage but still under the PHP 250,000/year cap:
-            # no cash subsidy (that's minimum-wage-gated), but still
-            # eligible for the VAT/discount benefit, subject to income
-            # verification since it's close to the boundary.
-            result['needs_verification'] = True
-            result['benefits'] = [
-                {
-                    'name': 'VAT Exemption & Discounts (Pending Verification)',
-                    'description': 'VAT discount and exemption, pending LGU income verification'
-                },
-                BENEFITS['health_services'],
-                BENEFITS['educational_support'],
-                BENEFITS['housing_benefits'],
-                BENEFITS['flexible_work']
-            ]
-        else:
-            # Above the PHP 250,000/year cap: no subsidy, no VAT/discount,
-            # but still entitled to the non-income-tested benefits.
-            result['benefits'] = [
-                BENEFITS['health_services'],
-                BENEFITS['educational_support'],
-                BENEFITS['housing_benefits'],
-                BENEFITS['flexible_work']
-            ]
-    else:
-        # Not eligible
-        result['eligible'] = False
-        result['needs_verification'] = False
-        result['benefits'] = []
+    result['benefits'] = []
+    if result['eligible']:
+        for b in ENGINE_RULES['benefits']:
+            if engine_result['benefits'].get(b['id']):
+                result['benefits'].append({
+                    'name': b['label'],
+                    'description': BENEFIT_DESCRIPTIONS.get(b['id'], f"RA 11861 {b['section']}")
+                })
 
     return result
+
+
+def build_rule_engine_applicant(data, *, occupation, solo_parent_status,
+                                 status_specific_answer, number_of_children,
+                                 monthly_income):
+    """Translates this form's raw field names/values into the Applicant
+    shape engine.evaluate() expects. Pure field-name translation only — no
+    eligibility thresholds or category lists belong here; those live in
+    rules.json."""
+    try:
+        duration_months = int(status_specific_answer)
+    except (TypeError, ValueError):
+        # Categories with no duration follow-up question (see
+        # SOLO_PARENT_FOLLOW_UP_QUESTIONS) never populate this field, and
+        # their rules.json min_duration_months is 0, so 0 is the correct
+        # default rather than a sentinel failure value.
+        duration_months = 0
+
+    youngest_child_age_raw = data.get('youngest_child_age', '').strip()
+    try:
+        youngest_child_age = int(youngest_child_age_raw)
+    except (TypeError, ValueError):
+        youngest_child_age = None
+
+    return RuleApplicant(
+        type_of_solo_parent=TYPE_OF_SOLO_PARENT_MAP.get(solo_parent_status),
+        duration_months=duration_months,
+        is_pregnant=(solo_parent_status == 'pregnant_woman_unborn_child'),
+        number_of_dependents=number_of_children,
+        monthly_income=monthly_income,
+        employment_status=infer_employment_status(occupation),
+        with_pwd=(data.get('with_pwd', 'No') == 'Yes'),
+        youngest_child_age=youngest_child_age,
+        receiving_other_govt_cash_aid=(data.get('receiving_other_govt_cash_aid', 'No') == 'Yes'),
+        formal_philhealth_member=(data.get('formal_philhealth_member', 'No') == 'Yes'),
+        dependent_currently_studying=(data.get('dependent_currently_studying', 'No') == 'Yes'),
+    )
 
 
 @app.route('/')
@@ -643,15 +645,8 @@ def submit_assessment():
     except:
         age = 0
 
-    try:
-        monthly_income = float(form_data.get('monthly_income', 0))
-    except:
-        monthly_income = 0
-
-    try:
-        total_family_income = float(form_data.get('total_family_income', 0))
-    except:
-        total_family_income = 0
+    monthly_income = parse_money(form_data.get('monthly_income', 0))
+    total_family_income = parse_money(form_data.get('total_family_income', 0))
 
     try:
         number_of_children = int(form_data.get('number_of_dependent_children', 0))
@@ -719,6 +714,8 @@ def submit_assessment():
     needs_verification = rule_result.get('needs_verification', False)
     override = False
     rule_conflict = False
+    result['remarks'] = rule_result.get('remarks', '')
+    result['priority_level'] = rule_result.get('priority_level')
 
     if ml_result.get('model_status') == 'success':
         if ml_result['eligible'] != rule_result['eligible']:
@@ -730,8 +727,15 @@ def submit_assessment():
     # above). This check runs regardless of whether the ML model and the
     # rule-based logic agree — agreement between them doesn't mean much if
     # neither was ever validated on income values this extreme.
+    #
+    # The flag is only allowed to force "needs verification" when the
+    # applicant is otherwise ELIGIBLE. Eligibility itself isn't income-gated
+    # (income only gates which benefits apply), so a categorically
+    # not-eligible applicant is definitively not eligible no matter how
+    # large their reported income — turning that into "needs verification"
+    # would just hide the real rejection reason behind an income caveat.
     income_outlier = max(monthly_income, total_family_income) > INCOME_OUTLIER_THRESHOLD
-    if income_outlier:
+    if income_outlier and is_eligible:
         needs_verification = True
 
     decision_source = "Rule-Based Engine"
@@ -743,49 +747,26 @@ def submit_assessment():
     result['eligible'] = is_eligible
     result['decision_source'] = decision_source
     result['needs_verification'] = needs_verification
+
+    # Align the displayed confidence with the FINAL (rule-based) decision,
+    # not the ML model's raw predicted-class confidence. Without this, a
+    # rule/ML disagreement (rule_conflict) could show e.g. a green
+    # "ELIGIBLE" banner next to the model's confidence in "Not Eligible".
+    prob_eligible = ml_result.get('prob_eligible', 0.0)
+    prob_not_eligible = ml_result.get('prob_not_eligible', 1.0 - prob_eligible)
+    decision_confidence = prob_eligible if is_eligible else prob_not_eligible
+    result['confidence'] = decision_confidence
+    result['ml_metadata']['confidence_score'] = decision_confidence
+
     result['ml_metadata']['override'] = override
     result['ml_metadata']['rule_conflict'] = rule_conflict
     result['ml_metadata']['income_outlier_flagged'] = income_outlier
     result['ml_metadata']['income_outlier_threshold'] = INCOME_OUTLIER_THRESHOLD
 
-    # Populate and filter benefits dynamically based on income.
-    # Uses the same two RA 11861 Sec. 33 thresholds as assess_eligibility()
-    # above — kept in sync intentionally so the rule-based and displayed
-    # results never contradict each other on income tier logic.
-    if is_eligible:
-        if total_family_income <= REGIONAL_MINIMUM_WAGE_MONTHLY:
-            # Low income: all benefits, including the cash subsidy
-            result['benefits'] = [
-                {'name': 'Monthly Subsidy', 'description': 'PHP 1,500 cash assistance per child, subject to official guidelines'},
-                {'name': 'VAT Exemption & Discounts', 'description': '10% discount and VAT exemption on basic necessities and infant care products'},
-                {'name': 'Comprehensive Health Services', 'description': 'Discounts on medicines, medical supplies, and healthcare programs'},
-                {'name': 'Educational Assistance', 'description': 'Scholarship programs and school assistance for parent and children'},
-                {'name': 'Housing Benefits', 'description': 'Priority allocation in socialized and government housing projects'},
-                {'name': 'Flexible Work Schedule', 'description': '7 days of paid parental leave per year and flexible work hours'}
-            ]
-        elif total_family_income <= VAT_DISCOUNT_MONTHLY_CAP:
-            # Above minimum wage but under PHP 250,000/year: no cash
-            # subsidy, but still eligible for VAT/discount pending
-            # verification, plus the non-income-tested benefits.
-            result['needs_verification'] = True
-            result['benefits'] = [
-                {'name': 'VAT Exemption & Discounts (Pending Verification)', 'description': 'VAT discount and exemption, pending LGU income verification'},
-                {'name': 'Comprehensive Health Services', 'description': 'Discounts on medicines, medical supplies, and healthcare programs'},
-                {'name': 'Educational Assistance', 'description': 'Scholarship programs and school assistance for parent and children'},
-                {'name': 'Housing Benefits', 'description': 'Priority allocation in socialized and government housing projects'},
-                {'name': 'Flexible Work Schedule', 'description': '7 days of paid parental leave per year and flexible work hours'}
-            ]
-        else:
-            # Above PHP 250,000/year: no subsidy, no VAT/discount, but
-            # still entitled to the non-income-tested benefits.
-            result['benefits'] = [
-                {'name': 'Comprehensive Health Services', 'description': 'Discounts on medicines, medical supplies, and healthcare programs'},
-                {'name': 'Educational Assistance', 'description': 'Scholarship programs and school assistance for parent and children'},
-                {'name': 'Housing Benefits', 'description': 'Priority allocation in socialized and government housing projects'},
-                {'name': 'Flexible Work Schedule', 'description': '7 days of paid parental leave per year and flexible work hours'}
-            ]
-    else:
-        result['benefits'] = []
+    # assess_eligibility() already computed the benefit list via
+    # engine.evaluate() / rules.json — the single source of truth shared
+    # with client/. Nothing gets recomputed here.
+    result['benefits'] = rule_result.get('benefits', [])
 
     return render_template('result.html', result=result)
 
@@ -867,7 +848,7 @@ def generate_pdf(result):
         if result.get('eligible'):
             confidence = result.get('confidence', 0)
             if result.get('needs_verification'):
-                return f"ELIGIBLE (Needs Verification for Subsidy/Discounts) ({confidence:.1%} confidence)"
+                return f"ELIGIBLE (Flagged for MSWDO/DSWD Verification) ({confidence:.1%} confidence)"
             return f"ELIGIBLE ({confidence:.1%} confidence)"
         elif result.get('needs_verification'):
             return "NEEDS VERIFICATION"
@@ -1061,6 +1042,10 @@ def generate_pdf(result):
         
         row_bottom = table_y + ((rows - 1 - row_index) * row_h)
 
+        member_occupation = member.get('occupation', '')
+        member_income = member.get('income', 0) or 0
+        occupation_income = f"{member_occupation} / {money(member_income)}" if member_income else member_occupation
+
         values = [
             member.get('name', ''),
             member.get('relationship', ''),
@@ -1068,7 +1053,7 @@ def generate_pdf(result):
             member.get('age', ''),
             member.get('civil_status', ''),
             member.get('education', ''),
-            member.get('occupation', '')
+            occupation_income
         ]
 
         current_x = table_x
@@ -1259,28 +1244,14 @@ def generate_pdf(result):
 
         y -= 13
 
-        # Map dynamic benefits from result to display text
-        eligible_benefits = []
-        has_subsidy = any('Subsidy' in b.get('name', '') for b in result.get('benefits', []))
-        has_vat = any('VAT' in b.get('name', '') for b in result.get('benefits', []))
-
-        if has_subsidy:
-            eligible_benefits.append("PHP 1,500/month subsidy per dependent child, subject to official guidelines")
-        if has_vat:
-            eligible_benefits.append("VAT exemption on qualified goods and services")
-
-        eligible_benefits.extend([
-            "Educational support and scholarship assistance",
-            "Priority access to government services",
-            "Healthcare and wellness programs"
-        ])
-
-        c.setFont("Times-Roman", 8.3)
-        for item in eligible_benefits:
-            # Draw an empty circle
+        # result['benefits'] already holds exactly the benefits
+        # engine.evaluate() granted (see assess_eligibility()) — listed
+        # here directly so the PDF can never drift from the web page.
+        for benefit in result.get('benefits', []):
             c.circle(margin_left + 15, y + 3, 3.5, stroke=1, fill=0)
-            c.drawString(margin_left + 25, y, item)
-            y -= 11
+            text = f"{benefit.get('name', '')}: {benefit.get('description', '')}"
+            y = draw_wrapped_text(text, margin_left + 25, y, max_chars=115, line_height=10, font_size=8.3)
+            y -= 1
 
     # ---------- Footer ----------
     y -= 20

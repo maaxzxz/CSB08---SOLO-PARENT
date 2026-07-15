@@ -12,10 +12,17 @@
                 <div class="card-body p-4">
                     <!-- Eligibility Result -->
                     {% if result.eligible %}
-                    <div class="result-icon mb-4 text-center">
-                        <i class="fas fa-check-circle text-success"></i>
+                    <div class="status-card text-center mb-4">
+                        <div class="result-icon">
+                            <i class="fas fa-check-circle text-success"></i>
+                        </div>
+                        <h2 class="status-heading">Eligible for Solo Parent Benefits</h2>
+                        {% if result.priority_level %}
+                        <p class="mb-0">
+                            <span class="badge {% if result.priority_level == 'High' %}bg-danger{% elif result.priority_level == 'Medium' %}bg-warning text-dark{% else %}bg-secondary{% endif %}">Priority: {{ result.priority_level }}</span>
+                        </p>
+                        {% endif %}
                     </div>
-                    <h2 class="mb-2 text-center">Eligible for Solo Parent Benefits</h2>
                     {% if result.benefits %}
                     <p class="text-center text-success mb-4 fs-5 fw-bold">Available Benefits You Can Receive:</p>
                     {% endif %}
@@ -42,8 +49,8 @@
                                 {% set icon_class = 'fas fa-graduation-cap' %}
                             {% elif 'housing' in name_lower or 'home' in name_lower %}
                                 {% set icon_class = 'fas fa-home' %}
-                            {% elif 'work' in name_lower or 'schedule' in name_lower or 'leave' in name_lower %}
-                                {% set icon_class = 'fas fa-clock' %}
+                            {% elif 'work' in name_lower or 'schedule' in name_lower or 'leave' in name_lower or 'livelihood' in name_lower or 'employment' in name_lower %}
+                                {% set icon_class = 'fas fa-briefcase' %}
                             {% else %}
                                 {% set icon_class = 'fas fa-check-circle' %}
                             {% endif %}
@@ -72,26 +79,61 @@
 
                     {% if result.needs_verification %}
                     <div class="alert alert-warning text-center mx-auto mb-4" style="max-width: 650px;">
-                        <i class="fas fa-exclamation-triangle"></i> <strong>Notice:</strong> Your income is borderline.
-                        While you are eligible for Solo Parent status, your cash subsidy and VAT exemption benefits are
-                        subject to official LGU verification.
+                        <i class="fas fa-exclamation-triangle"></i> <strong>Notice:</strong> This assessment needs
+                        additional verification before it can be finalized, even though you are eligible for Solo
+                        Parent status.
+                        {% if result.ml_metadata.rule_conflict %}
+                        <p class="small mb-0 mt-2">The ML model's prediction disagreed with the rules-engine decision above.</p>
+                        {% endif %}
+                        {% if result.ml_metadata.income_outlier_flagged %}
+                        <div class="income-verify-badge">
+                            <i class="fas fa-hand-holding-usd"></i>
+                            <div class="income-verify-text">
+                                <span class="income-verify-label">Monthly Income</span>
+                                <span class="income-verify-amount">PHP {{ '{:,.0f}'.format(result.applicant_info.monthly_income) }}</span>
+                            </div>
+                            <span class="badge bg-warning text-dark">Needs Verification</span>
+                        </div>
+                        {% endif %}
                     </div>
                     {% endif %}
 
                     {% elif result.needs_verification %}
-                    <div class="result-icon mb-4 text-center">
-                        <i class="fas fa-exclamation-circle text-warning"></i>
+                    <div class="status-card text-center mb-4">
+                        <div class="result-icon">
+                            <i class="fas fa-exclamation-circle text-warning"></i>
+                        </div>
+                        <h2 class="status-heading">Needs Verification</h2>
+                        <p class="text-muted mb-0">Your case requires further assessment. Additional
+                            documentation may be needed.</p>
+                        {% if result.ml_metadata.rule_conflict %}
+                        <p class="small text-muted mb-0 mt-2">The ML model's prediction disagreed with the rules-engine decision.</p>
+                        {% endif %}
+                        {% if result.ml_metadata.income_outlier_flagged %}
+                        <div class="income-verify-badge">
+                            <i class="fas fa-hand-holding-usd"></i>
+                            <div class="income-verify-text">
+                                <span class="income-verify-label">Monthly Income</span>
+                                <span class="income-verify-amount">PHP {{ '{:,.0f}'.format(result.applicant_info.monthly_income) }}</span>
+                            </div>
+                            <span class="badge bg-warning text-dark">Needs Verification</span>
+                        </div>
+                        {% endif %}
                     </div>
-                    <h2 class="mb-2 text-center">Needs Verification</h2>
-                    <p class="text-muted mb-5 text-center">Your case requires further assessment. Additional
-                        documentation may be needed.</p>
 
                     {% else %}
-                    <div class="result-icon mb-4 text-center">
-                        <i class="fas fa-times-circle text-danger"></i>
+                    <div class="status-card text-center mb-4">
+                        <div class="result-icon">
+                            <i class="fas fa-times-circle text-danger"></i>
+                        </div>
+                        <h2 class="status-heading">Currently Not Eligible</h2>
+                        {% if result.remarks %}
+                        <p class="text-muted mb-2">{{ result.remarks }}</p>
+                        {% else %}
+                        <p class="text-muted mb-2">Based on the information provided in your application, you do not currently meet the eligibility criteria for the Solo Parent benefits under RA 11861.</p>
+                        {% endif %}
+                        <p class="text-muted mb-0">If your circumstances change (such as changes in income, employment, duration, or number of dependents), you are welcome to submit a new assessment.</p>
                     </div>
-                    <h2 class="mb-2 text-center">Currently Not Eligible</h2>
-                    <p class="text-muted mb-5 text-center">Based on the information provided in your application, you do not currently meet the eligibility criteria for the Solo Parent benefits under RA 11861. If your circumstances change (such as changes in income, employment, or number of dependents), you are welcome to submit a new assessment.</p>
                     {% endif %}
 
                     <!-- Applicant Summary -->
@@ -295,6 +337,59 @@
 
     .result-icon {
         font-size: 4rem;
+        margin-bottom: 0.5rem;
+        line-height: 1;
+    }
+
+    .status-card {
+        max-width: 650px;
+        margin-left: auto;
+        margin-right: auto;
+        background: #f8f9fa;
+        border: 1px solid #e9ecef;
+        border-radius: 12px;
+        padding: 2rem 1.75rem;
+    }
+
+    .status-heading {
+        margin-bottom: 0.75rem;
+        font-weight: 700;
+    }
+
+    .income-verify-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 12px;
+        background: #fff;
+        border: 1px solid #f1c86b;
+        border-radius: 10px;
+        padding: 10px 18px;
+        margin-top: 12px;
+    }
+
+    .income-verify-badge i {
+        color: #b06d00;
+        font-size: 1.3rem;
+    }
+
+    .income-verify-text {
+        display: flex;
+        flex-direction: column;
+        text-align: left;
+        line-height: 1.2;
+    }
+
+    .income-verify-label {
+        font-size: 0.72rem;
+        color: #6c757d;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+    }
+
+    .income-verify-amount {
+        font-weight: 700;
+        color: #212529;
+        font-size: 1rem;
     }
 
     .confidence-bar {

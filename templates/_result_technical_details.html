@@ -1,17 +1,26 @@
+{% set ml_ok = result.ml_metadata and result.ml_metadata.model_status == 'success' %}
 <div class="card border-info mb-4">
     <div class="card-header bg-info text-white">
         <h6 class="mb-0"><i class="fas fa-robot"></i> Machine Learning Assessment (Technical Details)</h6>
     </div>
     <div class="card-body">
+        <p class="text-muted small mb-3">
+            The final eligibility decision above is made by the RA 11861 rules engine. The
+            machine-learning model below runs separately as a secondary confidence signal only
+            &mdash; it does not decide eligibility.
+        </p>
+
+        {% if ml_ok %}
         <div class="text-center mb-4">
-            <p class="mb-1"><strong>ML Assessment Result:</strong> 
-                {% if result.eligible %}
+            <p class="mb-1"><strong>ML Model Prediction:</strong>
+                {% if result.ml_metadata.prob_eligible >= 0.5 %}
                     <span class="badge bg-success">ELIGIBLE</span>
                 {% else %}
                     <span class="badge bg-danger">NOT ELIGIBLE</span>
                 {% endif %}
             </p>
-            <p class="text-muted mb-3">Confidence Score: <strong>{{ '%.1f%%' | format(result.confidence * 100) }}</strong></p>
+            <p class="text-muted mb-3">Model Confidence in the Final Decision:
+                <strong>{{ '%.1f%%' | format(result.confidence * 100) }}</strong></p>
             <div class="mb-3 confidence-bar mx-auto" style="max-width: 400px;">
                 <div class="progress" style="height: 25px;">
                     <div class="progress-bar {% if result.eligible %}bg-success{% else %}bg-danger{% endif %}" role="progressbar"
@@ -21,22 +30,41 @@
                 </div>
             </div>
         </div>
-        
-        {% if result.ml_metadata %}
+
         <div class="row small text-start">
             <div class="col-md-6">
                 <p class="mb-2"><strong>Model Type:</strong> {{ result.ml_metadata.model_type }}</p>
                 <p class="mb-2"><strong>Model Version:</strong> {{ result.ml_metadata.model_version }}</p>
-                <p class="mb-0"><strong>Model Status:</strong> <span class="badge bg-success">{{ result.ml_metadata.model_status | default('Active') | title }}</span></p>
+                <p class="mb-0"><strong>Model Status:</strong> <span class="badge bg-success">Success</span></p>
             </div>
             <div class="col-md-6">
-                <p class="mb-2"><strong>Eligibility Probability:</strong> {{ '%.1f%%' | format(result.ml_metadata.prob_eligible * 100) }}</p>
-                <p class="mb-2"><strong>Not Eligible Probability:</strong> {{ '%.1f%%' | format(result.ml_metadata.prob_not_eligible * 100) }}</p>
-                <p class="mb-0"><strong>Assessment Confidence:</strong> {{ '%.1f%%' | format(result.confidence * 100) }}</p>
+                <p class="mb-2"><strong>ML Eligibility Probability:</strong> {{ '%.1f%%' | format(result.ml_metadata.prob_eligible * 100) }}</p>
+                <p class="mb-2"><strong>ML Not-Eligible Probability:</strong> {{ '%.1f%%' | format(result.ml_metadata.prob_not_eligible * 100) }}</p>
+                <p class="mb-0"><strong>Confidence in Final Decision:</strong> {{ '%.1f%%' | format(result.confidence * 100) }}</p>
             </div>
         </div>
         <hr>
+        {% else %}
+        <div class="alert alert-secondary small mb-3">
+            <i class="fas fa-info-circle"></i> The ML confidence model was
+            <strong>{{ result.ml_metadata.model_status | default('unavailable') }}</strong>
+            for this assessment, so no model probability is shown. The eligibility decision
+            above stands on the RA 11861 rules engine alone.
+        </div>
         {% endif %}
-        <p class="text-muted small mb-0"><i class="fas fa-info-circle"></i> This assessment is based on a machine learning model trained on historical data. Final determination requires MSWDO/DSWD personnel verification.</p>
+
+        {% if result.ml_metadata.rule_conflict or result.ml_metadata.income_outlier_flagged %}
+        <p class="small mb-2"><strong>Why verification is needed:</strong></p>
+        <ul class="small text-muted mb-3">
+            {% if result.ml_metadata.rule_conflict %}
+            <li>The ML model's prediction disagreed with the rules-engine decision above. This does
+                not mean the decision is wrong &mdash; it flags an unusual case for a human reviewer.</li>
+            {% endif %}
+            {% if result.ml_metadata.income_outlier_flagged %}
+            <li>Reported income exceeds PHP {{ '{:,.0f}'.format(result.ml_metadata.income_outlier_threshold) }}, well outside the range the ML model was trained/validated on.</li>
+            {% endif %}
+        </ul>
+        {% endif %}
+        <p class="text-muted small mb-0"><i class="fas fa-info-circle"></i> This assessment is a first-step screening. Final determination requires MSWDO/DSWD personnel verification.</p>
     </div>
 </div>

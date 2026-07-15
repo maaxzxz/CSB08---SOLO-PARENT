@@ -8,24 +8,27 @@ def test_pdf_generation():
     print("TESTING PDF GENERATION FOR ELIGIBLE AND BORDERLINE/HIGH INCOME CASES")
     print("=" * 80)
 
-    # 1. Low income result
+    # Benefit fixtures below mirror the current rules.json benefit set and
+    # RA 11861 Sec. 15/Sec. 9 wording (see BENEFIT_DESCRIPTIONS in app.py).
+
+    # 1. Low income result — qualifies for the full benefit set
     res_low = {
         'eligible': True,
         'confidence': 0.95,
         'needs_verification': False,
         'benefits': [
-            {'name': 'Monthly Subsidy', 'description': 'PHP 1,500 cash assistance per child'},
-            {'name': 'VAT Exemption & Discounts', 'description': '10% discount and VAT exemption'},
-            {'name': 'Comprehensive Health Services', 'description': 'Discounts on medicines'},
-            {'name': 'Educational Assistance', 'description': 'Scholarship programs'},
-            {'name': 'Housing Benefits', 'description': 'Priority allocation'},
-            {'name': 'Flexible Work Schedule', 'description': '7 days leave'}
+            {'name': 'Cash Subsidy', 'description': 'PHP 1,000 monthly cash subsidy per solo parent, subject to fund availability.'},
+            {'name': 'VAT Discount/Exemption', 'description': '10% discount and VAT exemption on select child-care goods for children aged 0-6.'},
+            {'name': 'PhilHealth / NHIP Automatic Coverage', 'description': 'Automatic PhilHealth/NHIP coverage for solo parents not already formally covered.'},
+            {'name': 'Livelihood / Employment Priority', 'description': 'Priority access to livelihood, self-employment, and skills training programs.'},
+            {'name': 'Housing Priority', 'description': 'Priority allocation in government socialized housing projects.'},
+            {'name': 'Educational Support', 'description': 'Scholarship and tuition assistance for a dependent currently studying.'}
         ],
         'applicant_info': {
             'name': 'Carmela Reyes',
             'age': 22,
             'civil_status': 'Single',
-            'solo_parent_status': 'Single',
+            'solo_parent_status': 'Single Parent (Unmarried)',
             'address': 'Labuin',
             'contact': '09123456789',
             'occupation': 'Unemployed',
@@ -36,24 +39,20 @@ def test_pdf_generation():
         'family_members': []
     }
 
-    # 2. Borderline income result
+    # 2. Eligible but flagged for verification (income outlier / ML conflict)
     res_borderline = {
         'eligible': True,
         'confidence': 0.88,
         'needs_verification': True,
         'benefits': [
-            {'name': 'Monthly Subsidy (Pending Verification)', 'description': 'PHP 1,500 cash assistance per child, pending verification'},
-            {'name': 'VAT Exemption & Discounts (Pending Verification)', 'description': 'VAT discount and exemption, pending verification'},
-            {'name': 'Comprehensive Health Services', 'description': 'Discounts on medicines'},
-            {'name': 'Educational Assistance', 'description': 'Scholarship programs'},
-            {'name': 'Housing Benefits', 'description': 'Priority allocation'},
-            {'name': 'Flexible Work Schedule', 'description': '7 days leave'}
+            {'name': 'PhilHealth / NHIP Automatic Coverage', 'description': 'Automatic PhilHealth/NHIP coverage for solo parents not already formally covered.'},
+            {'name': 'Educational Support', 'description': 'Scholarship and tuition assistance for a dependent currently studying.'}
         ],
         'applicant_info': {
             'name': 'Maria Santos',
             'age': 35,
             'civil_status': 'Separated',
-            'solo_parent_status': 'Separated',
+            'solo_parent_status': 'Legally Separated',
             'address': 'Calios',
             'contact': '09123456789',
             'occupation': 'Employed',
@@ -64,22 +63,20 @@ def test_pdf_generation():
         'family_members': []
     }
 
-    # 3. High income result
+    # 3. High income result — only the non-income-gated benefits apply
     res_high = {
         'eligible': True,
         'confidence': 0.92,
         'needs_verification': False,
         'benefits': [
-            {'name': 'Comprehensive Health Services', 'description': 'Discounts on medicines'},
-            {'name': 'Educational Assistance', 'description': 'Scholarship programs'},
-            {'name': 'Housing Benefits', 'description': 'Priority allocation'},
-            {'name': 'Flexible Work Schedule', 'description': '7 days leave'}
+            {'name': 'PhilHealth / NHIP Automatic Coverage', 'description': 'Automatic PhilHealth/NHIP coverage for solo parents not already formally covered.'},
+            {'name': 'Educational Support', 'description': 'Scholarship and tuition assistance for a dependent currently studying.'}
         ],
         'applicant_info': {
             'name': 'Dominic Villanueva',
             'age': 55,
             'civil_status': 'Separated',
-            'solo_parent_status': 'Separated',
+            'solo_parent_status': 'Legally Separated',
             'address': 'Labuin',
             'contact': '09123456789',
             'occupation': 'Self-Employed',
